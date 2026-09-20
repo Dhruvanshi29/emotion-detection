@@ -1,0 +1,97 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+
+jobs:
+  test:
+    name: pytest (SQLite)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run pytest
+        env:
+          APP_ENV: test
+          DATABASE_URL: sqlite+aiosqlite:///./ci.db
+          JWT_SECRET: ci-only-jwt-secret-that-is-at-least-32-chars-long
+          JWT_REFRESH_SECRET: ci-only-refresh-secret-that-is-at-least-32-chars-long
+        run: pytest -q
+
+  migrations:
+    name: Alembic migrations (Postgres)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run alembic upgrade head
+        env:
+          DATABASE_URL: postgresql+asyncpg://ci:ci@localhost:5432/ci
+          JWT_SECRET: ci-only-jwt-secret-that-is-at-least-32-chars-long
+          JWT_REFRESH_SECRET: ci-only-refresh-secret-that-is-at-least-32-chars-long
+        run: alembic upgrade head
+
+      - name: Verify migrations are up-to-date (no pending revision)
+        env:
+          DATABASE_URL: postgresql+asyncpg://ci:ci@localhost:5432/ci
+          JWT_SECRET: ci-only-jwt-secret-that-is-at-least-32-chars-long
+          JWT_REFRESH_SECRET: ci-only-refresh-secret-that-is-at-least-32-chars-long
+        run: |
+          alembic current
+          alembic heads

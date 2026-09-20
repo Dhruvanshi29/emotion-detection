@@ -1,0 +1,91 @@
+PLAN ADDENDUM — FREE-LLM PROVIDER STRATEGY
+==========================================
+(Companion to plan.txt. Section numbers below extend the original plan;
+nothing in the original plan is removed.)
+
+
+A. Free / low-cost LLM providers (refines §4 and §19)
+
+The original plan lists a single `LLM_API_KEY` (§19). In practice the project
+should be built against a **provider-agnostic adapter** (already called out in
+§4) with multiple free providers configurable at once, tried in a fallback
+chain. This keeps development free and prevents a single-provider outage or
+quota from taking the product down.
+
+Supported providers (all have free tiers as of the plan date):
+
+  Provider    Endpoint style          Key env var           Default model
+  ---------   ----------------------  --------------------  ---------------------------------
+  Groq        OpenAI-compatible       GROQ_API_KEY          llama-3.1-8b-instant
+  OpenRouter  OpenAI-compatible       OPENROUTER_API_KEY    meta-llama/llama-3.1-8b-instruct:free
+  NVIDIA NIM  OpenAI-compatible       NVIDIA_API_KEY        meta/llama-3.1-8b-instruct
+  Gemini      Native REST (v1beta)    GEMINI_API_KEY        gemini-2.0-flash
+
+Chain order is configured by `LLM_PROVIDER_CHAIN` (comma-separated). At least
+one key must be set; the router skips providers with no key and falls back
+down the chain on any HTTP or network error. Streaming falls back only if
+zero tokens have been sent to the client (otherwise the error is surfaced,
+because switching mid-stream would produce garbled output).
+
+Concrete env vars replacing/expanding §19's single `LLM_API_KEY`:
+
+  LLM_PROVIDER_CHAIN          e.g. "groq,openrouter,nvidia,gemini"
+  GROQ_API_KEY / GROQ_MODEL / GROQ_BASE_URL
+  OPENROUTER_API_KEY / OPENROUTER_MODEL / OPENROUTER_BASE_URL
+    OPENROUTER_APP_URL / OPENROUTER_APP_NAME  (attribution headers)
+  NVIDIA_API_KEY / NVIDIA_MODEL / NVIDIA_BASE_URL
+  GEMINI_API_KEY / GEMINI_MODEL / GEMINI_BASE_URL
+  LLM_MAX_TOKENS / LLM_TEMPERATURE / LLM_TIMEOUT_SECONDS
+
+STT (§19's `STT_API_KEY`) is intentionally left as a single var for now —
+Phase 5 (Voice) will add the same provider-agnostic pattern for
+speech-to-text (Groq Whisper, Deepgram free tier, or browser-side Whisper).
+
+
+B. Cost implications (refines §21)
+
+Using free-tier providers changes §21's cost picture during Phases 1–4:
+
+  - Text emotion + companion chat run on free-tier LLMs for development
+    and MVP. Budget monitoring is still required per §21 because free
+    tiers are rate-limited (requests/minute and tokens/minute), not
+    unlimited. Rate-limit errors are treated as provider failures and
+    trigger fallback in the router.
+
+  - Meter free-tier usage per user_id + feature (per §21) even when the
+    dollar cost is zero, so V2/V3 paid-tier decisions have real data.
+
+  - Do NOT rely on a free tier for production launch traffic without a
+    paid fallback in the chain. The chain design lets you add a paid
+    provider as a last entry when launching, with no code changes.
+
+
+C. Safety implications (refines §13)
+
+The chain must not weaken safety:
+
+  - The SafetyClassifier (§6) runs against the same LLMRouter but should
+    be pinned to a single, tested provider per environment to avoid
+    silent behavior drift across providers. Use the `provider` field on
+    the chat request to pin.
+
+  - The AI-regression test set in §20 must run against every provider in
+    the chain, not just the default, because a provider swap is now an
+    automatic runtime event.
+
+
+D. Repository structure (refines §11)
+
+Adds under backend/app/services/ai/:
+
+  llm/
+    base.py                 ChatMessage, LLMResponse, LLMProvider ABC
+    _openai_compat.py       Shared OpenAI-style transport
+    router.py               LLMRouter (fallback chain, streaming)
+    providers/
+      nvidia.py
+      openrouter.py
+      groq.py
+      gemini.py
+
+Adding a provider = one file in providers/ + one line in the registry.

@@ -1,0 +1,553 @@
+﻿
+
+
+MULTIMODAL AI
+EMOTIONAL WELLNESS PLATFORM
+
+A–Z Product, Architecture &amp; Development Blueprint
+
+Version 2 — Reviewed &amp; Enhanced
+
+Python + FastAPI • React + TypeScript • Neon PostgreSQL • Render • Vercel
+
+
+
+Prepared as a build-from-scratch implementation plan
+
+Reviewer&apos;s note: this version keeps every section of the original plan and adds compliance, cost, governance, and CI/CD detail flagged as missing on review (see the callout at the start of Section 1).
+
+
+
+1. Executive Summary
+
+The proposed product is a multimodal AI emotional wellness platform rather than a simple emotion-detection chatbot. It combines text, voice and optional facial-expression signals with journaling, an AI companion, wellness recommendations, professional discovery, reminders, longitudinal mood analytics, memory and a dedicated safety layer.
+
+The architecture is intentionally modular: ordinary application services handle authentication, CRUD, scheduling and data, while AI services handle interpretation, conversational reasoning, personalization and recommendation. This reduces complexity and makes the platform easier to test, deploy and evolve.
+
+Product principle: support and screen, do not diagnose. The system should communicate uncertainty and direct users toward qualified professionals when appropriate.
+
+
+Review note: the original plan is strong on architecture, AI service boundaries, and phased delivery. This revision keeps it entirely intact and adds six areas that were missing or thin: regulatory/compliance posture (§18), environment &amp; secrets reference (§19), CI/CD pipeline (§20), cost/budget planning for AI providers (§21), therapist verification &amp; liability safeguards (§22), and clinical content governance &amp; monetization (§23–24).
+
+
+2. Product Goals
+Goal
+Outcome
+Emotional insight
+Users can understand patterns in mood, sentiment and emotional signals over time.
+Accessible support
+Users can talk to an AI companion for reflective, non-judgmental wellness support.
+Multimodal analysis
+Text, voice and optional facial-expression inputs can contribute to an emotion estimate.
+Personalization
+Recommendations use preferences, history, goals and recent context.
+Human escalation
+Users can discover therapists/professionals and receive safety-oriented guidance when needed.
+Daily habit support
+Reminders, exercises, journaling and reflections encourage consistent wellness routines.
+Privacy by design
+Consent, minimization, deletion and careful handling of audio/video are first-class requirements.
+
+
+3. System Architecture
+
+Recommended production topology:
+
+
+
+Frontend: React + TypeScript on Vercel. Backend: Python/FastAPI on Render. Primary data: Neon PostgreSQL. Redis plus a worker process handles asynchronous jobs such as reminders and long-running analysis. Object storage is preferred for large media rather than storing audio/video blobs directly in PostgreSQL.
+
+
+4. Technology Stack
+Layer / Recommendation
+Purpose
+Frontend — React + TypeScript + Vite
+Application UI and interaction
+UI — Tailwind CSS + shadcn/ui
+Consistent responsive interface
+State/API — TanStack Query + lightweight client store
+Server state and UI state
+Forms — React Hook Form + Zod
+Validation
+Backend — Python + FastAPI
+REST/WebSocket API
+ORM — SQLAlchemy + Alembic
+Database access and migrations
+Database — Neon PostgreSQL
+Transactional application data
+Vector search — pgvector
+Semantic memory/retrieval
+Cache/Jobs — Redis + worker
+Background processing, reminders, queues
+AI — Provider-agnostic model adapters
+LLM, STT, emotion and vision models
+Testing — Pytest + frontend component/e2e tests
+Reliability
+Deployment — Vercel + Render + Neon
+Production hosting
+
+
+5. Product Modules
+Module
+Core functionality / Priority
+Authentication
+Register, login, refresh, verification, password reset — P0
+AI Companion
+Streaming chat, context, conversation history — P0
+Text Emotion
+Emotion, sentiment, intensity, themes — P0
+Journal
+Text/voice journal, AI analysis, reflections — P0
+Dashboard
+Mood trends, emotion history, activity summaries — P0
+Safety
+Risk classification and safety-focused response routing — P0
+Wellness
+Breathing, grounding, reflection and personalized exercises — P1
+Reminders
+Recurring tasks, notifications, timezone-aware scheduling — P1
+Voice
+Recording, transcription, acoustic/voice emotion signals — P1
+Therapists
+Search/filter professionals by preferences and metadata — P1
+Facial Analysis
+Opt-in camera analysis and expression signals — P2
+Memory
+Preference and conversation memory with user controls — P2
+Analytics
+Product metrics and anonymized operational analytics — P2
+
+
+6. AI Architecture
+
+Recommended internal service boundaries:
+
+
+EmotionAnalyzer: analyze_text(), analyze_audio(), analyze_video(), fuse_results().
+
+
+SafetyClassifier: classify risk and route the conversation into the correct safety policy.
+
+
+CompanionService: generate supportive responses using current context and retrieved memories.
+
+
+MemoryService: summarize conversations, extract durable preferences and retrieve relevant context.
+
+
+RecommendationService: combine emotion signals, user preferences and wellness content into safe suggestions.
+
+
+ActionService: create reminders or other explicit user-approved actions.
+
+
+7. Multimodal Emotion Detection
+
+Treat emotion as a probabilistic signal, not a medical diagnosis. Fuse multiple weak signals rather than assuming one model is always correct.
+
+
+Input / Signals
+Implementation direction
+Text — sentiment, emotion, intensity, themes, intent
+NLP/LLM classifier + structured JSON output
+Voice — transcript, pitch, energy, rate, pauses, acoustic features
+STT + audio feature extraction + emotion model
+Face — expression/landmark features
+Optional browser-side or controlled inference
+Fusion — cross-modal confidence and agreement
+Weighted/learned fusion with uncertainty
+
+
+8. Core User Experience
+
+
+Onboarding → consent → wellness goals → preferences → optional microphone/camera permissions.
+
+
+Home dashboard → current self-reported mood → recent emotional trends → suggested actions.
+
+
+Companion → streaming AI conversation → visible controls for memory and data use.
+
+
+Journal → write/speak → analysis → reflection → save → trend contribution.
+
+
+Analyze → text/voice/face → results with confidence/uncertainty → suggested wellness actions.
+
+
+Wellness → exercise library → personalized recommendations → completion tracking.
+
+
+Professionals → filters for specialization, language, location, price and online/offline options.
+
+
+Reminders → create recurring reminders → timezone-aware scheduling → notification history.
+
+
+9. Database Blueprint
+Domain
+Suggested tables
+Identity
+users, profiles, preferences
+Conversation
+conversations, messages, conversation_summaries
+Journal
+journal_entries, journal_analysis
+Emotion
+emotion_events, emotion_scores, voice_analysis, facial_analysis
+Wellness
+wellness_exercises, exercise_sessions, user_goals
+Professionals
+therapists, therapist_specializations, therapist_availability, therapist_verifications
+Automation
+reminders, notifications
+Safety
+risk_assessments, safety_events, safety_reviews
+Memory
+user_memories, embeddings/vector index
+Operations
+feedback, audit_logs, consent_records
+
+Additions vs. v1: therapist_verifications (credential/license checks), safety_reviews (human review trail for flagged risk_assessments), and consent_records (granular consent history — see §18).
+
+
+10. API Surface
+
+
+Auth: POST /auth/register • POST /auth/login • POST /auth/refresh
+
+
+User: GET /users/me • PATCH /users/me
+
+
+Companion: POST /chat/message • GET /chat/conversations • GET /chat/{id}
+
+
+Emotion: POST /emotion/text • POST /emotion/audio • POST /emotion/video
+
+
+Journal: POST /journal • GET /journal • POST /journal/{id}/analyze
+
+
+Dashboard: GET /dashboard/summary • GET /dashboard/emotions • GET /dashboard/trends
+
+
+Professionals: GET /therapists • GET /therapists/{id}
+
+
+Wellness: GET /wellness/exercises • POST /wellness/sessions
+
+
+Reminders: GET /reminders • POST /reminders • PATCH /reminders/{id} • DELETE /reminders/{id}
+
+
+Compliance (new): POST /consent • GET /consent • POST /users/me/export • DELETE /users/me
+
+
+11. Repository Structure
+
+project/
+├── frontend/
+│   ├── src/pages/
+│   ├── src/components/
+│   ├── src/services/
+│   ├── src/hooks/
+│   ├── src/store/
+│   └── src/types/
+├── backend/
+│   ├── app/api/
+│   ├── app/core/
+│   ├── app/models/
+│   ├── app/schemas/
+│   ├── app/services/ai/
+│   ├── app/services/audio/
+│   ├── app/services/vision/
+│   ├── app/services/therapist/
+│   ├── app/services/notifications/
+│   ├── app/workers/
+│   └── app/db/
+├── .github/workflows/   (new — CI/CD, see §20)
+├── docs/
+├── infrastructure/
+├── tests/
+└── README.md
+
+
+12. A–Z Development Roadmap
+Phase / Workstream / Timeline
+Exit criteria
+Phase 0 — Architecture &amp; repo — Day 1
+Repo, contracts, DB design, security model
+Phase 1 — Foundation — Days 2–4
+FastAPI, Neon, migrations, auth, React shell
+Phase 2 — AI Companion — Days 5–8
+Chat, streaming, persistence, context, safety routing
+Phase 3 — Text Emotion — Days 9–11
+Emotion/sentiment analysis and structured results
+Phase 4 — Journal — Days 12–14
+Journal CRUD, AI analysis, reflection prompts
+Phase 5 — Voice — Days 15–19
+Recording, STT, acoustic features, voice emotion
+Phase 6 — Computer Vision — Days 20–24
+Opt-in camera and facial-expression analysis
+Phase 7 — Wellness — Days 25–27
+Exercises and deterministic recommendation engine
+Phase 8 — Professionals — Days 28–31
+Therapist discovery, filters, profile data, verification workflow
+Phase 9 — Reminders — Days 32–34
+Worker, recurring schedules, notifications
+Phase 10 — Dashboard — Days 35–38
+Trends, insights, progress and analytics
+Phase 11 — Memory — Days 39–42
+Summaries, embeddings, retrieval, memory controls
+Phase 12 — Security/Safety — Days 43–46
+Rate limits, consent, deletion, audit and safety testing
+Phase 13 — Testing — Days 47–51
+Unit, integration, E2E, AI behavior and failure tests
+Phase 14 — Production — Days 52–55
+Deploy, monitoring, domains, backups and launch checks
+
+
+13. Safety, Privacy &amp; Responsible AI
+
+
+Never present an AI emotion estimate as a clinical diagnosis.
+
+
+Use language such as &apos;signals&apos;, &apos;patterns&apos; and &apos;may be associated with&apos; rather than diagnostic claims.
+
+
+Make camera and microphone access explicitly opt-in and easy to revoke.
+
+
+Prefer browser-side processing for sensitive facial/video features when practical.
+
+
+Provide clear data deletion and memory controls.
+
+
+Separate safety classification from ordinary response generation so safety logic cannot be skipped by the conversational model.
+
+
+Test the system against crisis-related prompts, prompt injection, hallucinated diagnoses, overconfident recommendations and unsafe action requests.
+
+
+For potentially urgent situations, encourage appropriate human/emergency support rather than claiming the AI can intervene.
+
+
+Keep therapist recommendations based on explicit filters and trustworthy professional data, not an AI diagnosis.
+
+
+(New) Route every risk_assessment flagged &apos;high&apos; through a logged human safety_review before any automated escalation copy changes — see §22.
+
+
+14. Deployment Blueprint
+Component / Platform
+Notes
+Frontend — Vercel
+React build, environment variables, custom domain
+Backend — Render
+FastAPI web service; separate worker recommended
+Database — Neon
+PostgreSQL + migrations + pgvector if needed
+Cache/Queue — Managed Redis
+Background jobs and rate limiting (Render has no built-in Redis — provision Upstash or Redis Cloud)
+Media — Object storage
+Audio/video/files; avoid DB blobs (Cloudflare R2 or S3)
+Monitoring — Application + infrastructure monitoring
+Errors, latency, worker failures, AI failures (e.g. Sentry + Better Uptime)
+
+Required environment variables should be kept in platform secret stores and never committed to Git. See §19 for a concrete reference.
+
+
+15. Release Strategy
+Release
+Scope
+V1 / MVP
+Auth, dashboard, AI companion, text emotion, journal, mood tracking, wellness, basic safety, reminders
+V2
+Voice analysis, professional discovery, memory, advanced analytics
+V3
+Facial analysis, multimodal fusion, advanced personalization, agentic action workflows, external professional integrations, mobile app
+
+The architecture can be designed A–Z up front, but implementation should proceed as vertical slices so every phase leaves a deployable product.
+
+
+16. Definition of Done
+
+
+Feature works in local development.
+
+
+API has validation and error handling.
+
+
+Database migration is reproducible.
+
+
+Critical path has automated tests.
+
+
+AI outputs are schema-constrained and have fallbacks.
+
+
+Sensitive features have consent and deletion behavior.
+
+
+Frontend has loading, empty and error states.
+
+
+Logs do not expose sensitive user content unnecessarily.
+
+
+Production environment variables are configured securely.
+
+
+Feature is deployed and smoke-tested before moving to the next phase.
+
+
+17. Recommended Starting Point
+
+Start with the foundation and AI companion, then add text emotion and journaling before multimodal features. This establishes the product&apos;s data model, safety model and user experience early. Voice and facial analysis should be added only after the core emotional-support workflow is stable and privacy controls are in place.
+
+Target end state: a modular, production-oriented multimodal emotional wellness platform with a clear separation between AI reasoning, deterministic application logic, safety controls and persistent user data.
+
+
+
+18. Regulatory, Compliance &amp; Data Governance (new)
+
+A mental-wellness product handling mood, journal, voice and video data should treat that data as sensitive by default, even outside formal healthcare regulation.
+
+
+HIPAA is unlikely to apply directly unless you partner with a covered entity — but adopt HIPAA-adjacent practices anyway: encryption at rest and in transit, minimum-necessary access, audit logging of who accessed what.
+
+
+GDPR/CCPA-style rights regardless of target market: right to access, export, correct and delete data; a documented lawful basis for processing; a public, plain-language privacy policy.
+
+
+Explicit, granular consent for microphone/camera use, separate from general account consent, logged in consent_records with a timestamp and version of the policy shown.
+
+
+Data residency and retention policy: define how long raw audio/video is kept (recommend: delete raw media after feature extraction unless the user opts to keep it) and where it is stored geographically.
+
+
+Age-gating: this product is not appropriate for children without additional safeguards; require age confirmation at signup and block or restrict access for likely-minor accounts pending a dedicated minor-safety review.
+
+
+Maintain a data processing record (what is collected, why, retention period, who can access it) for each data domain in §9 — this becomes the backbone of your privacy policy and any future audit.
+
+
+19. Environment Variables &amp; Secrets Reference (new)
+Variable
+Used by / purpose
+DATABASE_URL
+Backend — Neon Postgres connection string
+REDIS_URL
+Backend/worker — job queue, rate limiting, caching
+JWT_SECRET / JWT_REFRESH_SECRET
+Backend — auth token signing
+LLM_API_KEY
+Backend — companion, emotion, memory summarization
+STT_API_KEY
+Backend — voice transcription
+OBJECT_STORAGE_KEY / SECRET / BUCKET
+Backend — audio/video/file storage (R2/S3)
+EMAIL_API_KEY
+Backend/worker — reminder and notification emails
+SENTRY_DSN
+Backend + frontend — error monitoring
+VITE_API_URL
+Frontend — backend base URL
+VITE_SENTRY_DSN
+Frontend — error monitoring
+
+Store all of the above in Render&apos;s and Vercel&apos;s secret managers, never in the repo. Rotate LLM_API_KEY and JWT secrets on a defined schedule and immediately on suspected exposure.
+
+
+20. CI/CD Pipeline (new)
+
+
+GitHub Actions workflow on every pull request: lint (ruff/eslint), type-check (mypy/tsc), unit tests (pytest/vitest).
+
+
+A separate workflow runs Alembic migrations against a disposable test database to catch migration errors before merge.
+
+
+Merges to main trigger Render and Vercel&apos;s native Git integration to deploy backend and frontend automatically; keep a manual-approval gate on the production Render service for early phases.
+
+
+Add a smoke-test step post-deploy (hit /health and one core endpoint) before marking a deploy successful.
+
+
+Track AI-specific regressions separately: a small fixed set of prompts (including crisis-language test cases from §13) run against the companion and safety classifier on every merge to catch silent behavior drift.
+
+
+21. Cost &amp; AI Provider Budget Considerations (new)
+
+AI-heavy features are the main variable cost driver. Plan for this explicitly rather than discovering it in production.
+
+
+Text emotion + companion chat: cost scales with LLM tokens per message; budget per-user monthly caps and truncate/summarize long conversation histories before sending to the model (this is also what MemoryService is for).
+
+
+Speech-to-text and voice emotion: typically priced per minute of audio — meter this separately and consider capping voice-journal length in the free tier.
+
+
+Facial analysis: prefer browser-side inference (e.g. a lightweight on-device model) specifically to avoid both privacy exposure and per-frame inference cost server-side.
+
+
+Set a hosting cost floor: Render web service + worker, Neon compute, managed Redis, and object storage all have separate free/paid tiers — confirm the combination fits your target user volume before committing to architecture in §3.
+
+
+Instrument cost per active user from day one (tag AI calls with user_id and feature) so V2/V3 pricing decisions in §24 are based on real data, not estimates.
+
+
+22. Therapist Verification &amp; Liability Safeguards (new)
+
+A therapist directory carries real trust and liability implications — treat it as a curated professional listing, not user-generated content.
+
+
+Verify license/credential status before a therapist profile goes live (manual review or a licensing-board API where available); store verification status and date in therapist_verifications.
+
+
+Display clearly that the platform is a discovery/filter tool and does not endorse, employ, or supervise listed professionals — put this disclaimer on every therapist profile, not just in the terms of service.
+
+
+Provide a reporting mechanism for outdated or incorrect professional information, and a re-verification cadence (e.g. annually).
+
+
+Keep the matching logic (§8, Professionals) filter-based on stated criteria — do not let the AI companion or emotion signals silently rank or recommend a specific individual, to avoid implying a clinical referral.
+
+
+Route the human review trail for high-severity risk_assessments (§13) through a defined on-call or escalation process, not an unstaffed queue — document who is responsible for acting on a flagged conversation and within what time window.
+
+
+23. Clinical Content Governance (new)
+
+Wellness exercises, safety-response copy, and reflection prompts are user-facing clinical-adjacent content and should not be written by engineering alone.
+
+
+Have a licensed mental-health professional (contracted advisor is sufficient at MVP stage) review the wellness exercise library, onboarding language, and the safety-response templates from §13 before launch.
+
+
+Version and log changes to safety-response copy specifically — this is the highest-liability text in the product and should have its own review/approval trail, separate from normal code review.
+
+
+Re-review clinical content on a fixed cadence (e.g. every 6–12 months) and whenever the underlying AI model changes, since model updates can shift how prompts are interpreted.
+
+
+24. Monetization Options (new)
+Model
+Notes
+Freemium
+Free journaling + basic mood tracking; paid tier unlocks voice analysis, unlimited AI companion messages, and advanced analytics.
+Subscription
+Flat monthly/annual fee for full feature access — simplest to reason about alongside the AI cost structure in §21.
+B2B2C
+License the platform to employers, universities, or clinics as an employee/student wellness benefit — changes data-ownership and privacy-policy requirements (the institution may need its own consent flow).
+Professional referral
+Optional paid placement or subscription for therapists to appear in the directory — must be clearly disclosed as advertising, not editorial ranking, to preserve trust from §22.
+
+Whichever model is chosen, keep core safety features (crisis detection and resource surfacing) free and unrestricted regardless of subscription tier.
+

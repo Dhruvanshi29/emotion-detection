@@ -1,0 +1,43 @@
+name: Post-deploy Smoke
+
+# Manual (or callable) smoke test that hits a live deployment and verifies
+# /health, /ready and /chat/providers. Run this after promoting a Render
+# deploy to production — plan §20 requires a smoke check before marking a
+# deploy successful.
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Full https URL of the deployed backend (no trailing slash)"
+        required: true
+        type: string
+      expect_env:
+        description: "Expected APP_ENV in /health response (e.g. production)"
+        required: false
+        default: production
+        type: string
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install httpx
+        run: pip install "httpx>=0.27,<1.0"
+
+      - name: Run smoke script
+        env:
+          SMOKE_BASE: ${{ inputs.base_url }}
+          SMOKE_EXPECT_ENV: ${{ inputs.expect_env }}
+          SMOKE_TIMEOUT: "30"
+        run: python scripts/smoke.py

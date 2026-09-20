@@ -1,0 +1,76 @@
+# Render deployment blueprint — plan.txt §14, Phase 14.
+#
+# Free-tier deployment: one FastAPI web service. Render does not offer free
+# background workers, so this service also hosts the reminders scheduler.
+# Because free web services sleep when idle, reminder delivery is best-effort.
+#
+# Set secrets in the Render dashboard, NEVER commit them. See §19 for the full
+# secrets reference and DEPLOY.md for the launch checklist.
+
+services:
+  # ---------- Web (FastAPI) ----------
+  - type: web
+    name: emotion-detection-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    # Pre-deploy commands are not available on the free plan, so migrations
+    # run immediately before the single application process starts.
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /ready
+    autoDeploy: true
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_ROLE
+        value: web
+      - key: APP_VERSION
+        value: 0.1.0
+      - key: GIT_SHA
+        # Render exposes the deploy commit as RENDER_GIT_COMMIT.
+        fromService:
+          type: web
+          name: emotion-detection-api
+          envVarKey: RENDER_GIT_COMMIT
+      - key: LOG_LEVEL
+        value: INFO
+      - key: PYTHON_VERSION
+        value: "3.12.6"
+      # --- Set the following in the Render dashboard (marked sync:false) ---
+      - key: DATABASE_URL           # Neon Postgres (asyncpg URL)
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      - key: GOOGLE_IDENTITY_PLATFORM_PROJECT_ID
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS   # e.g. https://app.example.com
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
+      # LLM providers — at least one key required (see plan_addendum §A)
+      - key: LLM_PROVIDER_CHAIN
+        value: groq,openrouter,nvidia,gemini
+      - key: GROQ_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: NVIDIA_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      # Free-tier compromise: the scheduler runs in the single web instance.
+      # It pauses whenever Render spins the service down for inactivity.
+      - key: REMINDERS_SCHEDULER_ENABLED
+        value: "true"
+      - key: REMINDERS_SCHEDULER_INTERVAL_SECONDS
+        value: "60"
+      - key: RETENTION_PURGE_ENABLED
+        value: "true"
+      # Rate limits — on in production.
+      - key: RATE_LIMIT_ENABLED
+        value: "true"
+      - key: REDIS_URL               # Managed Redis / Render Key Value URL
+        sync: false
