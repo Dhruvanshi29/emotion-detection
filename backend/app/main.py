@@ -28,7 +28,7 @@ from app.core.middleware import (
     install_log_redaction,
 )
 from app.db import session as _session_mod
-from app.services import reminders_service, therapist_service, wellness_service
+from app.services import reminders_service, task_queue, therapist_service, wellness_service
 
 settings = get_settings()
 if settings.log_format.lower() == "json":
@@ -90,8 +90,17 @@ async def _scheduler_loop(interval_seconds: float) -> None:
         try:
             async with _session_mod.SessionLocal() as db:
                 created = await reminders_service.dispatch_due(db)
+                delivered = await reminders_service.deliver_pending_email_notifications(db)
+                pushed = await reminders_service.deliver_pending_push_notifications(db)
+                jobs = await task_queue.process_pending(db)
                 if created:
                     log.info("reminders: dispatched %d notifications", created)
+                if delivered:
+                    log.info("reminders: delivered %d emails", delivered)
+                if pushed:
+                    log.info("reminders: delivered %d push notifications", pushed)
+                if jobs:
+                    log.info("tasks: completed %d durable jobs", jobs)
         except Exception as e:  # noqa: BLE001
             log.warning("reminders: dispatch failed (%s)", e)
         await asyncio.sleep(interval_seconds)
@@ -107,9 +116,10 @@ async def lifespan(_app: FastAPI):
             inserted = await wellness_service.ensure_seed(db)
             if inserted:
                 log.info("wellness: seeded %d exercises", inserted)
-            t_inserted = await therapist_service.ensure_seed(db)
-            if t_inserted:
-                log.info("therapists: seeded %d professionals", t_inserted)
+            if not settings.is_production:
+                t_inserted = await therapist_service.ensure_seed(db)
+                if t_inserted:
+                    log.info("therapists: seeded %d development professionals", t_inserted)
     except Exception as e:  # noqa: BLE001
         log.warning("seed skipped (%s)", e)
     if settings.reminders_scheduler_enabled:
@@ -167,7 +177,9 @@ app.add_middleware(RequestIDMiddleware)
 # semantic (fresh id per request, cache still keyed by header).
 if settings.idempotency_enabled:
     app.add_middleware(
-        IdempotencyMiddleware, ttl_seconds=settings.idempotency_ttl_seconds
+        IdempotencyMiddleware,
+        ttl_seconds=settings.idempotency_ttl_seconds,
+        redis_url=settings.redis_url,
     )
 
 # Metrics collection wraps everything else so it can time and label all routes.

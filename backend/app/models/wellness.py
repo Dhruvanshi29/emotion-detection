@@ -19,6 +19,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.crypto import EncryptedText
 from app.db.base import Base
 
 
@@ -79,7 +80,7 @@ class ExerciseSession(Base):
         DateTime(timezone=True), nullable=True
     )
     rating: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(EncryptedText, nullable=True)
 
     exercise: Mapped["WellnessExercise"] = relationship(lazy="joined")
 

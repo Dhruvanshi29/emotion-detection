@@ -4,8 +4,9 @@ Clients that send an ``Idempotency-Key`` header on POST /chat/message or
 POST /journal will get the previously stored response for that (user, method,
 path, key) tuple. Prevents duplicate writes on retry.
 
-Storage is process-local. Deploy a single web replica until this store is
-moved to a shared backend; rate limiting already uses Redis independently.
+Storage uses Redis when ``REDIS_URL`` is configured, allowing multiple web
+replicas to share replays. Development and transient Redis outages fall back
+to a bounded process-local store.
 """
 from __future__ import annotations
 
@@ -33,7 +34,7 @@ class _InMemoryStore:
     def __init__(self) -> None:
         self._data: dict[str, tuple[float, dict[str, Any]]] = {}
 
-    def get(self, key: str) -> Optional[dict[str, Any]]:
+    async def get(self, key: str) -> Optional[dict[str, Any]]:
         row = self._data.get(key)
         if not row:
             return None
@@ -43,7 +44,7 @@ class _InMemoryStore:
             return None
         return payload
 
-    def set(self, key: str, payload: dict[str, Any], ttl: int) -> None:
+    async def set(self, key: str, payload: dict[str, Any], ttl: int) -> None:
         # Opportunistic sweep so the dict doesn't grow forever in dev.
         if len(self._data) > 1024:
             now = time.time()
@@ -56,10 +57,40 @@ class _InMemoryStore:
 _STORE = _InMemoryStore()
 
 
+class _RedisStore:
+    """Shared idempotency store with a safe local fallback for outages."""
+
+    def __init__(self, url: str) -> None:
+        from redis.asyncio import from_url
+
+        self.client = from_url(url, decode_responses=True)
+        self.fallback = _InMemoryStore()
+
+    @staticmethod
+    def _key(key: str) -> str:
+        return "saaya:idempotency:" + hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+    async def get(self, key: str) -> Optional[dict[str, Any]]:
+        try:
+            raw = await self.client.get(self._key(key))
+            return json.loads(raw) if raw else None
+        except Exception as exc:  # noqa: BLE001
+            log.warning("redis idempotency read failed; using local fallback (%s)", type(exc).__name__)
+            return await self.fallback.get(key)
+
+    async def set(self, key: str, payload: dict[str, Any], ttl: int) -> None:
+        try:
+            await self.client.set(self._key(key), json.dumps(payload), ex=ttl)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("redis idempotency write failed; using local fallback (%s)", type(exc).__name__)
+            await self.fallback.set(key, payload, ttl)
+
+
 class IdempotencyMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app: ASGIApp, *, ttl_seconds: int) -> None:
+    def __init__(self, app: ASGIApp, *, ttl_seconds: int, redis_url: str = "") -> None:
         super().__init__(app)
         self.ttl = int(ttl_seconds)
+        self.store = _RedisStore(redis_url) if redis_url else _STORE
 
     async def dispatch(
         self,
@@ -82,7 +113,7 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         cache_key = (
             f"{auth_fingerprint}|{request.method}|{request.url.path}|{raw_key}"
         )
-        cached = _STORE.get(cache_key)
+        cached = await self.store.get(cache_key)
         if cached is not None:
             if cached.get("request_hash") != body_hash:
                 return JSONResponse(
@@ -112,7 +143,7 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
             except Exception:  # noqa: BLE001
                 body_json = None
             if body_json is not None:
-                _STORE.set(
+                await self.store.set(
                     cache_key,
                     {
                         "status": response.status_code,

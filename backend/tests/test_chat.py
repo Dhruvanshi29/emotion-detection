@@ -37,6 +37,23 @@ async def test_message_creates_conversation_and_reply(client):
 
 
 @pytest.mark.asyncio
+async def test_streamed_message_is_safe_and_persisted(client):
+    headers = await _auth(client, "stream@example.com")
+    response = await client.post(
+        "/chat/message/stream",
+        headers=headers,
+        json={"content": "I am feeling hopeful today"},
+    )
+    assert response.status_code == 200
+    assert "event: delta" in response.text
+    assert "event: done" in response.text
+    assert "[stub reply]" in response.text
+    conversations = (await client.get("/chat/conversations", headers=headers)).json()
+    detail = (await client.get(f"/chat/conversations/{conversations[0]['id']}", headers=headers)).json()
+    assert [message["role"] for message in detail["messages"]] == ["user", "assistant"]
+
+
+@pytest.mark.asyncio
 async def test_history_is_sent_to_llm(client):
     headers = await _auth(client, "hist@example.com")
     r1 = await client.post(

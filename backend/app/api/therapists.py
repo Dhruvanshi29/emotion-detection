@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser
 from app.db.session import get_db
-from app.models.therapist import Therapist, TherapistVerification
+from app.models.therapist import Therapist, TherapistReport, TherapistVerification
+from app.models.user import User
 from app.schemas.therapist import (
     TherapistAvailabilitySlot,
     TherapistDetail,
@@ -18,14 +21,28 @@ from app.schemas.therapist import (
     TherapistReportRead,
     TherapistSummary,
     TherapistVerificationRead,
+    TherapistAdminCreate,
+    TherapistVerificationUpdate,
+    TherapistReportStatusUpdate,
 )
 from app.services import therapist_service
+from app.core.config import get_settings
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/therapists", tags=["therapists"])
 
 DbDep = Annotated[AsyncSession, Depends(get_db)]
+
+
+async def require_therapist_admin(user: CurrentUser):
+    allowed = get_settings().therapist_admin_emails_list
+    if not user.is_verified or user.email.lower() not in allowed:
+        raise HTTPException(status_code=403, detail="Therapist directory administrator access required")
+    return user
+
+
+AdminUser = Annotated[User, Depends(require_therapist_admin)]
 
 
 def _summary(t: Therapist) -> TherapistSummary:
@@ -147,4 +164,56 @@ async def report_therapist(
         kind=body.kind,
         notes=body.notes,
     )
+    return TherapistReportRead.model_validate(report)
+
+
+@router.post("/admin/profiles", response_model=TherapistDetail, status_code=201)
+async def admin_create_profile(payload: TherapistAdminCreate, _admin: AdminUser, db: DbDep) -> TherapistDetail:
+    existing = await therapist_service.get_therapist_by_slug(db, slug=payload.slug)
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="Therapist slug already exists")
+    row = await therapist_service.admin_create_therapist(db, payload)
+    return _detail(row)
+
+
+@router.post("/admin/{slug}/verification", response_model=TherapistVerificationRead)
+async def admin_verify_profile(slug: str, payload: TherapistVerificationUpdate, admin: AdminUser, db: DbDep) -> TherapistVerificationRead:
+    row = await therapist_service.get_therapist_by_slug(db, slug=slug)
+    if row is None:
+        raise HTTPException(status_code=404, detail="therapist not found")
+    now = datetime.now(timezone.utc)
+    verification = TherapistVerification(
+        therapist_id=row.id,
+        status=payload.status,
+        license_number=payload.license_number,
+        license_authority=payload.license_authority,
+        verified_at=now if payload.status == "verified" else None,
+        verified_by=getattr(admin, "email", "admin"),
+        expires_at=payload.expires_at,
+        notes=payload.notes,
+    )
+    db.add(verification)
+    await db.commit()
+    await db.refresh(verification)
+    return TherapistVerificationRead.model_validate(verification)
+
+
+@router.get("/admin/reports", response_model=List[TherapistReportRead])
+async def admin_list_reports(_admin: AdminUser, db: DbDep, status_filter: Optional[str] = Query(default="open")) -> List[TherapistReportRead]:
+    stmt = select(TherapistReport).order_by(TherapistReport.created_at.desc())
+    if status_filter:
+        stmt = stmt.where(TherapistReport.status == status_filter)
+    rows = list((await db.execute(stmt)).scalars().all())
+    return [TherapistReportRead.model_validate(row) for row in rows]
+
+
+@router.patch("/admin/reports/{report_id}", response_model=TherapistReportRead)
+async def admin_update_report(report_id: str, payload: TherapistReportStatusUpdate, _admin: AdminUser, db: DbDep) -> TherapistReportRead:
+    report = (await db.execute(select(TherapistReport).where(TherapistReport.id == report_id))).scalar_one_or_none()
+    if report is None:
+        raise HTTPException(status_code=404, detail="report not found")
+    report.status = payload.status
+    report.notes = payload.notes
+    await db.commit()
+    await db.refresh(report)
     return TherapistReportRead.model_validate(report)

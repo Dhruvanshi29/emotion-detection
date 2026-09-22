@@ -195,10 +195,10 @@ export default function WellnessPage() {
   return (
     <div className="mx-auto max-w-5xl px-4 py-8 space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">Wellness</h1>
+        <h1 className="text-2xl font-semibold">A little care for right now</h1>
         <p className="text-sm text-slate-600 dark:text-slate-400">
-          Curated exercises with deterministic recommendations based on your
-          recent signals and goals. These are gentle suggestions, not medical advice.
+          Choose one small thing that feels kind today. These are gentle
+          suggestions, never requirements or medical advice.
         </p>
       </div>
 

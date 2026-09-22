@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
-import { api } from '../lib/api'
+import { api, getAccessToken } from '../lib/api'
 
 type Msg = {
   id?: string
@@ -31,7 +31,7 @@ type ConversationDetail = Conversation & { messages: Msg[] }
 const WELCOME: Msg = {
   role: 'assistant',
   content:
-    "Hi, I'm here with you. This is a safe, private space. How are you feeling right now?",
+    "Hi. I’m here with you, and there’s no rush. You can share a feeling, a thought, or simply say you’re not sure where to begin.",
 }
 
 export default function ChatPage() {
@@ -39,6 +39,8 @@ export default function ChatPage() {
   const [activeId, setActiveId] = useState<string | null>(null)
   const [draftMessages, setDraftMessages] = useState<Msg[]>([WELCOME])
   const [input, setInput] = useState('')
+  const [optimisticUser, setOptimisticUser] = useState<Msg | null>(null)
+  const [streamingText, setStreamingText] = useState('')
   const boxRef = useRef<HTMLDivElement>(null)
 
   const convs = useQuery({
@@ -60,9 +62,14 @@ export default function ChatPage() {
     },
   })
 
-  const messages: Msg[] = activeId
+  const storedMessages: Msg[] = activeId
     ? active.data?.messages ?? []
     : draftMessages
+  const messages = [
+    ...storedMessages,
+    ...(optimisticUser ? [optimisticUser] : []),
+    ...(streamingText ? [{ role: 'assistant' as const, content: streamingText }] : []),
+  ]
 
   useEffect(() => {
     setTimeout(
@@ -73,12 +80,37 @@ export default function ChatPage() {
 
   const send = useMutation({
     mutationFn: async (content: string) => {
-      const r = await api.post<ChatResp>('/chat/message', {
-        conversation_id: activeId ?? undefined,
-        content,
-        max_tokens: 1024,
+      const response = await fetch(`${api.defaults.baseURL || ''}/chat/message/stream`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}),
+        },
+        body: JSON.stringify({ conversation_id: activeId ?? undefined, content, max_tokens: 1024 }),
       })
-      return r.data
+      if (!response.ok || !response.body) throw new Error('Unable to reach your companion')
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let result: ChatResp | null = null
+      while (true) {
+        const { done, value } = await reader.read()
+        buffer += decoder.decode(value, { stream: !done })
+        const blocks = buffer.split(/\r?\n\r?\n/)
+        buffer = blocks.pop() ?? ''
+        for (const block of blocks) {
+          const lines = block.split(/\r?\n/)
+          const event = lines.find((line) => line.startsWith('event:'))?.slice(6).trim()
+          const data = lines.filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trimStart()).join('\n')
+          if (event === 'delta') setStreamingText((current) => current + data)
+          if (event === 'done') result = JSON.parse(data) as ChatResp
+          if (event === 'error') throw new Error(data)
+        }
+        if (done) break
+      }
+      if (!result) throw new Error('The response ended early')
+      return result
     },
     onSuccess: async (data) => {
       if (!activeId) setActiveId(data.conversation_id)
@@ -86,10 +118,14 @@ export default function ChatPage() {
       await qc.invalidateQueries({
         queryKey: ['conversation', data.conversation_id],
       })
+      setOptimisticUser(null)
+      setStreamingText('')
     },
     onError: () => {
       // Show a soft failure locally; server persistence is atomic so nothing
       // is left in a half state.
+      setOptimisticUser(null)
+      setStreamingText('')
     },
   })
 
@@ -98,15 +134,15 @@ export default function ChatPage() {
     const text = input.trim()
     if (!text || send.isPending) return
     setInput('')
-    if (!activeId) {
-      setDraftMessages((m) => [...m, { role: 'user', content: text }])
-    }
+    setOptimisticUser({ role: 'user', content: text })
     send.mutate(text)
   }
 
   function newConversation() {
     setActiveId(null)
     setDraftMessages([WELCOME])
+    setOptimisticUser(null)
+    setStreamingText('')
   }
 
   async function archiveActive() {
@@ -116,19 +152,28 @@ export default function ChatPage() {
     newConversation()
   }
 
+  async function deleteActive() {
+    if (!activeId || !confirm('Delete this conversation permanently?')) return
+    await api.delete(`/chat/conversations/${activeId}`)
+    await qc.invalidateQueries({ queryKey: ['conversations'] })
+    newConversation()
+  }
+
   return (
-    <div className="mx-auto max-w-6xl h-[calc(100vh-57px)] flex px-2 gap-2">
+    <div className="mx-auto max-w-6xl h-[calc(100vh-132px)] min-h-[560px] flex gap-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white/60 dark:bg-slate-900/40 overflow-hidden">
       {/* Sidebar */}
       <aside className="w-60 shrink-0 py-4 hidden sm:flex flex-col border-r border-slate-200 dark:border-slate-800 pr-3">
         <button
           onClick={newConversation}
           className="w-full rounded-md bg-indigo-600 text-white py-2 mb-3 hover:bg-indigo-700"
         >
-          + New chat
+          + A fresh conversation
         </button>
         <div className="overflow-y-auto space-y-1 text-sm">
           {convs.data?.length === 0 && (
-            <div className="text-slate-500 italic px-2">No chats yet</div>
+            <div className="text-slate-500 italic px-2 py-3">
+              Your conversations will rest here.
+            </div>
           )}
           {convs.data?.map((c) => (
             <button
@@ -179,7 +224,7 @@ export default function ChatPage() {
               </div>
             </div>
           ))}
-          {send.isPending && (
+          {send.isPending && !streamingText && (
             <div className="text-sm text-slate-500 italic px-2">Thinking…</div>
           )}
         </div>
@@ -187,7 +232,7 @@ export default function ChatPage() {
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Type how you're feeling…"
+            placeholder="Share as much or as little as you like…"
             className="flex-1 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2"
           />
           <button
@@ -195,17 +240,20 @@ export default function ChatPage() {
             disabled={send.isPending || !input.trim()}
             className="rounded-md bg-indigo-600 text-white px-4 py-2 hover:bg-indigo-700 disabled:opacity-50"
           >
-            Send
+            Share
           </button>
           {activeId && (
-            <button
-              type="button"
-              onClick={archiveActive}
-              className="rounded-md border border-slate-300 dark:border-slate-700 px-3 py-2 hover:bg-slate-100 dark:hover:bg-slate-800 text-sm"
-              title="Archive this chat"
-            >
-              Archive
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={archiveActive}
+                className="rounded-md border border-slate-300 dark:border-slate-700 px-3 py-2 hover:bg-slate-100 dark:hover:bg-slate-800 text-sm"
+                title="Archive this chat"
+              >
+                Archive
+              </button>
+              <button type="button" onClick={deleteActive} className="rounded-md border border-rose-300 px-3 py-2 text-sm text-rose-700 hover:bg-rose-50 dark:border-rose-900 dark:text-rose-300 dark:hover:bg-rose-950" title="Delete this conversation">Delete</button>
+            </>
           )}
         </form>
         <p className="text-xs text-slate-500 pb-3 text-center px-2">

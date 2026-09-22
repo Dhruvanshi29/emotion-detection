@@ -18,12 +18,36 @@ from app.schemas.reminder import (
     ReminderList,
     ReminderRead,
     ReminderUpdate,
+    PushSubscriptionCreate,
+    PushSubscriptionDelete,
+    PushConfig,
 )
-from app.services import reminders_service
+from app.services import push_service, reminders_service
 
 router = APIRouter(tags=["reminders"])
 
 DbDep = Annotated[AsyncSession, Depends(get_db)]
+
+
+@router.get("/push/config", response_model=PushConfig)
+async def push_config(_user: CurrentUser) -> PushConfig:
+    settings = get_settings()
+    enabled = push_service.configured()
+    return PushConfig(enabled=enabled, public_key=settings.vapid_public_key if enabled else None)
+
+
+@router.post("/push/subscriptions", status_code=201)
+async def subscribe_push(payload: PushSubscriptionCreate, user: CurrentUser, db: DbDep) -> dict:
+    if not push_service.configured():
+        raise HTTPException(status_code=503, detail="Push notifications are not configured")
+    await push_service.upsert(db, user_id=user.id, endpoint=payload.endpoint, p256dh=payload.p256dh, auth=payload.auth)
+    return {"detail": "Push notifications enabled"}
+
+
+@router.delete("/push/subscriptions")
+async def unsubscribe_push(payload: PushSubscriptionDelete, user: CurrentUser, db: DbDep) -> dict:
+    await push_service.remove(db, user_id=user.id, endpoint=payload.endpoint)
+    return {"detail": "Push notifications disabled"}
 
 
 @router.get("/reminders", response_model=ReminderList)

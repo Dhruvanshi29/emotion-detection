@@ -19,6 +19,7 @@ Ciphertext layout (after the ``enc:v1:`` prefix), base64-url-encoded:
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import os
 from typing import Any, Optional
@@ -103,7 +104,14 @@ def decrypt_str(value: str) -> str:
         nonce, ct = raw[:12], raw[12:]
         return cipher.decrypt(nonce, ct, associated_data=None).decode("utf-8")
     except Exception as e:  # noqa: BLE001
-        log.warning("decrypt failed, returning raw value: %s", e)
+        log.error("decrypt failed for encrypted field: %s", type(e).__name__)
+        try:
+            from app.core.config import get_settings
+
+            if get_settings().is_production:
+                raise ValueError("encrypted field could not be decrypted") from e
+        except ImportError:
+            pass
         return value
 
 
@@ -139,3 +147,24 @@ class EncryptedString(TypeDecorator):
         if value is None:
             return None
         return decrypt_str(str(value))
+
+
+class EncryptedJSON(TypeDecorator):
+    """JSON-compatible value encrypted into a text column."""
+
+    impl = Text
+    cache_ok = True
+
+    def process_bind_param(self, value: Any, dialect: Any) -> Any:
+        if value is None:
+            return None
+        return encrypt_str(json.dumps(value, separators=(",", ":"), ensure_ascii=False))
+
+    def process_result_value(self, value: Any, dialect: Any) -> Any:
+        if value is None or isinstance(value, (dict, list, int, float, bool)):
+            return value
+        raw = decrypt_str(str(value))
+        try:
+            return json.loads(raw)
+        except (TypeError, ValueError):
+            return value

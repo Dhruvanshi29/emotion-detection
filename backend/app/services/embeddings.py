@@ -15,6 +15,9 @@ import re
 from abc import ABC, abstractmethod
 from functools import lru_cache
 from typing import List
+import logging
+
+import httpx
 
 from app.core.config import get_settings
 
@@ -74,6 +77,39 @@ class HashEmbedder(EmbeddingProvider):
         return out
 
 
+class OpenAICompatibleEmbedder(EmbeddingProvider):
+    """Remote semantic embeddings with a privacy-preserving local fallback."""
+
+    def __init__(self, *, base_url: str, api_key: str, model: str, fallback: HashEmbedder) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
+        self.model = model
+        self.name = model
+        self.fallback = fallback
+        self.dims = 0
+
+    def embed(self, texts: List[str]) -> List[List[float]]:
+        try:
+            with httpx.Client(timeout=20.0) as client:
+                response = client.post(
+                    f"{self.base_url}/embeddings",
+                    headers={"Authorization": f"Bearer {self.api_key}"},
+                    json={"model": self.model, "input": texts},
+                )
+                response.raise_for_status()
+                rows = sorted(response.json()["data"], key=lambda item: item["index"])
+                vectors = [[float(value) for value in item["embedding"]] for item in rows]
+                if len(vectors) != len(texts) or any(not vector for vector in vectors):
+                    raise ValueError("embedding provider returned an invalid batch")
+                self.dims = len(vectors[0])
+                return vectors
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger(__name__).warning(
+                "semantic embeddings unavailable; using local fallback (%s)", type(exc).__name__
+            )
+            return self.fallback.embed(texts)
+
+
 def cosine(a: List[float], b: List[float]) -> float:
     if not a or not b or len(a) != len(b):
         return 0.0
@@ -84,7 +120,15 @@ def cosine(a: List[float], b: List[float]) -> float:
 @lru_cache(maxsize=1)
 def get_embedder() -> EmbeddingProvider:
     settings = get_settings()
-    return HashEmbedder(dims=settings.memory_embedding_dims)
+    fallback = HashEmbedder(dims=settings.memory_embedding_dims)
+    if settings.embedding_api_base and settings.embedding_api_key:
+        return OpenAICompatibleEmbedder(
+            base_url=settings.embedding_api_base,
+            api_key=settings.embedding_api_key,
+            model=settings.embedding_model,
+            fallback=fallback,
+        )
+    return fallback
 
 
-__all__ = ["EmbeddingProvider", "HashEmbedder", "cosine", "get_embedder", "_tokens"]
+__all__ = ["EmbeddingProvider", "HashEmbedder", "OpenAICompatibleEmbedder", "cosine", "get_embedder", "_tokens"]

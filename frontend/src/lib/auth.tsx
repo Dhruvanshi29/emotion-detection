@@ -11,8 +11,9 @@ import {
   api,
   clearTokens,
   getAccessToken,
-  getRefreshToken,
-  setTokens,
+  getCsrfToken,
+  setAccessToken,
+  setCsrfToken,
 } from './api'
 import { getGoogleIdentityToken } from './googleAuth'
 
@@ -36,6 +37,7 @@ export type UserRead = {
   email: string
   is_active: boolean
   is_verified: boolean
+  mfa_enabled: boolean
   created_at: string
   profile: UserProfile
   preferences: UserPreferences
@@ -44,9 +46,9 @@ export type UserRead = {
 type AuthState = {
   user: UserRead | null
   loading: boolean
-  login: (email: string, password: string) => Promise<void>
+  login: (email: string, password: string, mfaCode?: string) => Promise<void>
   loginWithGoogle: () => Promise<void>
-  register: (email: string, password: string, displayName?: string) => Promise<void>
+  register: (email: string, password: string, displayName?: string, dobYear?: number) => Promise<void>
   logout: () => Promise<void>
   logoutAll: () => Promise<void>
   changePassword: (current: string, next: string) => Promise<void>
@@ -74,26 +76,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     ;(async () => {
+      if (!getAccessToken() && getCsrfToken()) {
+        try {
+          const r = await api.post('/auth/browser/refresh')
+          setAccessToken(r.data.access_token)
+          setCsrfToken(r.data.csrf_token)
+        } catch {
+          clearTokens()
+        }
+      }
       await refreshMe()
       setLoading(false)
     })()
   }, [refreshMe])
 
   const login = useCallback(
-    async (email: string, password: string) => {
-      const r = await api.post('/auth/login', { email, password })
-      setTokens(r.data.access_token, r.data.refresh_token)
+    async (email: string, password: string, mfaCode?: string) => {
+      const r = await api.post('/auth/browser/login', { email, password, mfa_code: mfaCode || undefined })
+      setAccessToken(r.data.access_token)
+      setCsrfToken(r.data.csrf_token)
       await refreshMe()
     },
     [refreshMe],
   )
 
   const register = useCallback(
-    async (email: string, password: string, displayName?: string) => {
+    async (email: string, password: string, displayName?: string, dobYear?: number) => {
       await api.post('/auth/register', {
         email,
         password,
         display_name: displayName,
+        age_confirmed: true,
+        dob_year: dobYear,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
       })
       await login(email, password)
     },
@@ -102,17 +117,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loginWithGoogle = useCallback(async () => {
     const idToken = await getGoogleIdentityToken()
-    const r = await api.post('/auth/google', { id_token: idToken })
-    setTokens(r.data.access_token, r.data.refresh_token)
+    const r = await api.post('/auth/browser/google', { id_token: idToken })
+    setAccessToken(r.data.access_token)
+    setCsrfToken(r.data.csrf_token)
     await refreshMe()
   }, [refreshMe])
 
+  useEffect(() => {
+    const theme = user?.preferences?.theme || 'system'
+    const media = window.matchMedia('(prefers-color-scheme: dark)')
+    const apply = () => {
+      const dark = theme === 'dark' || (theme === 'system' && media.matches)
+      document.documentElement.classList.toggle('dark', dark)
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+      document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+    }
+    apply()
+    media.addEventListener('change', apply)
+    return () => media.removeEventListener('change', apply)
+  }, [user?.preferences?.theme])
+
   const logout = useCallback(async () => {
-    const refreshToken = getRefreshToken()
     try {
-      if (refreshToken) {
-        await api.post('/auth/logout', { refresh_token: refreshToken })
-      }
+      await api.post('/auth/browser/logout')
     } finally {
       clearTokens()
       setUser(null)
@@ -122,6 +149,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logoutAll = useCallback(async () => {
     try {
       await api.post('/auth/logout-all')
+      await api.post('/auth/browser/logout')
     } catch {
       // Even if the call fails (already invalidated, etc.), still clear locally.
     }
@@ -131,11 +159,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const changePassword = useCallback(
     async (current: string, next: string) => {
-      const r = await api.post('/auth/change-password', {
+      const r = await api.post('/auth/browser/change-password', {
         current_password: current,
         new_password: next,
       })
-      setTokens(r.data.access_token, r.data.refresh_token)
+      setAccessToken(r.data.access_token)
+      setCsrfToken(r.data.csrf_token)
       await refreshMe()
     },
     [refreshMe],

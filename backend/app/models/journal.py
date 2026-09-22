@@ -16,7 +16,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.crypto import EncryptedText
+from app.core.crypto import EncryptedJSON, EncryptedText
 from app.db.base import Base
 
 
@@ -35,11 +35,11 @@ class JournalEntry(Base):
     user_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
     )
-    title: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    title: Mapped[Optional[str]] = mapped_column(EncryptedText, nullable=True)
     content: Mapped[str] = mapped_column(EncryptedText, nullable=False)
     # Optional self-reported mood on a 1-5 scale (1=awful, 5=great).
     mood: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    tags: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
+    tags: Mapped[Optional[Any]] = mapped_column(EncryptedJSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, server_default=func.now(), nullable=False
     )
@@ -68,10 +68,10 @@ class JournalAnalysis(Base):
         unique=True,
         nullable=False,
     )
-    summary: Mapped[str] = mapped_column(Text, nullable=False)
-    themes: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
-    reflection_prompt: Mapped[str] = mapped_column(Text, nullable=False)
-    key_feelings: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
+    summary: Mapped[str] = mapped_column(EncryptedText, nullable=False)
+    themes: Mapped[Optional[Any]] = mapped_column(EncryptedJSON, nullable=True)
+    reflection_prompt: Mapped[str] = mapped_column(EncryptedText, nullable=False)
+    key_feelings: Mapped[Optional[Any]] = mapped_column(EncryptedJSON, nullable=True)
     dominant_emotion: Mapped[Optional[str]] = mapped_column(String(24), nullable=True)
     sentiment: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)

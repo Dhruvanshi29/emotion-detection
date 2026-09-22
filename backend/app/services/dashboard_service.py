@@ -199,6 +199,7 @@ async def build_summary(
             await db.execute(
                 select(func.count(Notification.id)).where(
                     Notification.user_id == user_id,
+                    Notification.channel == "in_app",
                     Notification.read_at.is_(None),
                 )
             )

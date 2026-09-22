@@ -17,6 +17,8 @@ from app.schemas.journal import (
     JournalUpdate,
 )
 from app.services import emotion_service, journal_service
+from app.services import task_queue
+from app.core.config import get_settings
 from app.services.ai.journal import JournalReflector, LLMJournalReflector
 from app.services.ai.llm.router import LLMRouter
 from app.services.emotion import EmotionAnalyzer
@@ -120,16 +122,30 @@ async def create_journal(
     )
 
     if req.analyze:
-        background.add_task(
-            _analyze_entry_bg,
-            reflector,
-            analyzer,
-            user_id=user.id,
-            entry_id=entry.id,
-            title=entry.title,
-            content=entry.content,
-            mood=entry.mood,
-        )
+        if get_settings().is_production:
+            await task_queue.enqueue(
+                db,
+                kind="journal_analysis",
+                dedupe_key=f"journal-analysis:{entry.id}",
+                payload={
+                    "user_id": user.id,
+                    "entry_id": entry.id,
+                    "title": entry.title,
+                    "content": entry.content,
+                    "mood": entry.mood,
+                },
+            )
+        else:
+            background.add_task(
+                _analyze_entry_bg,
+                reflector,
+                analyzer,
+                user_id=user.id,
+                entry_id=entry.id,
+                title=entry.title,
+                content=entry.content,
+                mood=entry.mood,
+            )
 
     return _to_read(entry)
 

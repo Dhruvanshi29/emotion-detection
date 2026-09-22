@@ -64,6 +64,7 @@ export default function JournalPage() {
   const qc = useQueryClient()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [mode, setMode] = useState<'view' | 'compose'>('compose')
+  const [editingId, setEditingId] = useState<string | null>(null)
 
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
@@ -101,6 +102,7 @@ export default function JournalPage() {
 
   function openCompose() {
     setSelectedId(null)
+    setEditingId(null)
     setMode('compose')
     resetComposer()
   }
@@ -108,6 +110,16 @@ export default function JournalPage() {
   function openEntry(id: string) {
     setSelectedId(id)
     setMode('view')
+  }
+
+  function editEntry(entry: EntryDetail) {
+    setEditingId(entry.id)
+    setSelectedId(entry.id)
+    setTitle(entry.title ?? '')
+    setContent(entry.content)
+    setMood(entry.mood)
+    setTagsText((entry.tags ?? []).join(', '))
+    setMode('compose')
   }
 
   const create = useMutation({
@@ -123,11 +135,14 @@ export default function JournalPage() {
           .slice(0, 20),
         analyze: true,
       }
-      const r = await api.post<EntryDetail>('/journal', payload)
+      const r = editingId
+        ? await api.patch<EntryDetail>(`/journal/${editingId}`, payload)
+        : await api.post<EntryDetail>('/journal', payload)
       return r.data
     },
     onSuccess: async (data) => {
       resetComposer()
+      setEditingId(null)
       await qc.invalidateQueries({ queryKey: ['journal', 'list'] })
       setSelectedId(data.id)
       setMode('view')
@@ -222,6 +237,7 @@ export default function JournalPage() {
       <section className="flex-1 flex flex-col min-w-0 py-4 overflow-y-auto">
         {mode === 'compose' ? (
           <ComposePanel
+            editing={!!editingId}
             title={title}
             setTitle={setTitle}
             content={content}
@@ -244,6 +260,7 @@ export default function JournalPage() {
             onDelete={() => {
               if (confirm('Delete this journal entry?')) del.mutate()
             }}
+            onEdit={() => detail.data && editEntry(detail.data)}
           />
         )}
       </section>
@@ -252,6 +269,7 @@ export default function JournalPage() {
 }
 
 function ComposePanel(props: {
+  editing: boolean
   title: string
   setTitle: (v: string) => void
   content: string
@@ -276,16 +294,17 @@ function ComposePanel(props: {
     onSubmit,
     submitting,
     error,
+    editing,
   } = props
 
   const canSubmit = content.trim().length > 0 && !submitting
 
   return (
     <div className="px-2 max-w-3xl w-full mx-auto">
-      <h1 className="text-2xl font-semibold mb-4">New journal entry</h1>
+      <h1 className="text-2xl font-semibold mb-2">{editing ? 'Shape this entry' : 'What is on your mind?'}</h1>
       <p className="text-sm text-slate-500 mb-4">
-        Write freely. Aria will read it after you save and offer a gentle
-        reflection — not advice, not a diagnosis.
+        Start anywhere. A sentence is enough. Saaya can offer a gentle
+        reflection after you save — never advice or a diagnosis.
       </p>
       <div className="space-y-4">
         <div>
@@ -363,7 +382,7 @@ function ComposePanel(props: {
             disabled={!canSubmit}
             className="rounded-md bg-indigo-600 text-white px-4 py-2 hover:bg-indigo-700 disabled:opacity-50"
           >
-            {submitting ? 'Saving…' : 'Save entry'}
+            {submitting ? 'Saving…' : editing ? 'Save changes' : 'Save entry'}
           </button>
         </div>
       </div>
@@ -378,8 +397,9 @@ function ViewPanel(props: {
   analyzing: boolean
   onAnalyze: () => void
   onDelete: () => void
+  onEdit: () => void
 }) {
-  const { entry, loading, error, analyzing, onAnalyze, onDelete } = props
+  const { entry, loading, error, analyzing, onAnalyze, onDelete, onEdit } = props
 
   if (loading) {
     return <div className="p-6 text-slate-500">Loading…</div>
@@ -430,6 +450,12 @@ function ViewPanel(props: {
           )}
         </div>
         <div className="flex gap-2 shrink-0">
+          <button
+            onClick={onEdit}
+            className="rounded-md border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-sm hover:bg-slate-100 dark:hover:bg-slate-800"
+          >
+            Edit
+          </button>
           <button
             onClick={onAnalyze}
             disabled={analyzing}

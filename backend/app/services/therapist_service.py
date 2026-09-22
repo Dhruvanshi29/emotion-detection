@@ -23,7 +23,7 @@ from app.models.therapist import (
     TherapistSpecialization,
     TherapistVerification,
 )
-from app.schemas.therapist import TherapistFilters
+from app.schemas.therapist import TherapistAdminCreate, TherapistFilters
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +186,10 @@ SEED_THERAPISTS: list[dict] = [
 
 async def ensure_seed(db: AsyncSession) -> int:
     inserted = 0
-    for entry in SEED_THERAPISTS:
+    for source in SEED_THERAPISTS:
+        # The seed constants are shared across lifespan/test invocations.
+        # Copy nested values before popping so repeated startup stays safe.
+        entry = dict(source)
         row = (
             await db.execute(select(Therapist).where(Therapist.slug == entry["slug"]))
         ).scalar_one_or_none()
@@ -369,6 +372,26 @@ async def create_report(
 
 async def count_reports(db: AsyncSession) -> int:
     return int((await db.execute(select(func.count()).select_from(TherapistReport))).scalar_one())
+
+
+async def admin_create_therapist(db: AsyncSession, payload: TherapistAdminCreate) -> Therapist:
+    data = payload.model_dump(exclude={"specializations", "languages", "availability"})
+    data["country_code"] = payload.country_code.upper()
+    data["currency"] = payload.currency.upper()
+    row = Therapist(**data)
+    db.add(row)
+    await db.flush()
+    for value in payload.specializations:
+        db.add(TherapistSpecialization(therapist_id=row.id, value=value.strip().lower()))
+    for code in payload.languages:
+        db.add(TherapistLanguage(therapist_id=row.id, code=code.strip().lower()))
+    for slot in payload.availability:
+        db.add(TherapistAvailability(therapist_id=row.id, **slot.model_dump()))
+    db.add(TherapistVerification(therapist_id=row.id, status="pending"))
+    await db.commit()
+    loaded = await get_therapist_by_slug(db, slug=row.slug)
+    assert loaded is not None
+    return loaded
 
 
 # Re-export names touched via and_/func for linters.

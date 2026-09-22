@@ -38,3 +38,9 @@ jobs:
         env:
           VITE_API_URL: ""
         run: npm run build
+
+      - name: Install browser for E2E
+        run: npx playwright install --with-deps chromium
+
+      - name: Public, mobile, and accessibility E2E
+        run: npm run test:e2e

@@ -11,6 +11,10 @@ Server-side ledger of refresh tokens (`RefreshToken` table) enables:
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import base64
+import hashlib
+import hmac
+import secrets
 from typing import Optional
 
 from sqlalchemy import select, update
@@ -18,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import create_access_token, create_refresh_token
 from app.models.refresh_token import RefreshToken
+from app.models.auth_action import AuthActionToken
 from app.models.user import User
 from app.schemas.auth import TokenPair
 
@@ -45,6 +50,39 @@ async def verify_google_identity_token(token: str, project_id: str) -> dict:
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def create_mfa_secret() -> str:
+    """Create a standard 160-bit base32 TOTP secret."""
+    return base64.b32encode(secrets.token_bytes(20)).decode("ascii").rstrip("=")
+
+
+def totp_code(secret: str, *, at: datetime | None = None) -> str:
+    """Generate an RFC 6238 SHA-1 TOTP code (also useful for verification tests)."""
+    try:
+        key = base64.b32decode(secret.upper() + "=" * (-len(secret) % 8))
+    except (ValueError, TypeError) as exc:
+        raise ValueError("invalid TOTP secret") from exc
+    counter = int((at or _utcnow()).timestamp()) // 30
+    digest = hmac.new(key, counter.to_bytes(8, "big"), hashlib.sha1).digest()
+    offset = digest[-1] & 0x0F
+    value = (int.from_bytes(digest[offset : offset + 4], "big") & 0x7FFFFFFF) % 1_000_000
+    return f"{value:06d}"
+
+
+def verify_totp(secret: str, code: str, *, at: datetime | None = None) -> bool:
+    """Verify RFC 6238 SHA-1 TOTP with a one-step clock-skew window."""
+    if not secret or not code.isdigit() or len(code) != 6:
+        return False
+    timestamp = int((at or _utcnow()).timestamp())
+    for drift in (-1, 0, 1):
+        try:
+            candidate = totp_code(secret, at=datetime.fromtimestamp(timestamp + drift * 30, timezone.utc))
+        except ValueError:
+            return False
+        if hmac.compare_digest(candidate, code):
+            return True
+    return False
 
 
 async def issue_token_pair(
@@ -166,3 +204,104 @@ async def bump_password_changed_at(db: AsyncSession, user: User) -> None:
     )
     user.password_changed_at = now
     await db.commit()
+
+
+async def issue_action_token(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    purpose: str,
+    ttl: timedelta,
+) -> str:
+    """Issue a single-use opaque token while persisting only its digest."""
+    now = _utcnow()
+    await db.execute(
+        update(AuthActionToken)
+        .where(
+            AuthActionToken.user_id == user_id,
+            AuthActionToken.purpose == purpose,
+            AuthActionToken.used_at.is_(None),
+        )
+        .values(used_at=now)
+    )
+    raw = secrets.token_urlsafe(40)
+    db.add(
+        AuthActionToken(
+            user_id=user_id,
+            purpose=purpose,
+            token_hash=hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+            expires_at=now + ttl,
+        )
+    )
+    await db.commit()
+    return raw
+
+
+async def consume_action_token(
+    db: AsyncSession,
+    *,
+    raw_token: str,
+    purpose: str,
+) -> Optional[User]:
+    """Atomically consume a valid action token and return its user."""
+    digest = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    row = (
+        await db.execute(
+            select(AuthActionToken).where(
+                AuthActionToken.token_hash == digest,
+                AuthActionToken.purpose == purpose,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None or row.used_at is not None:
+        return None
+    expires = row.expires_at
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    if expires <= _utcnow():
+        return None
+    result = await db.execute(
+        update(AuthActionToken)
+        .where(AuthActionToken.id == row.id, AuthActionToken.used_at.is_(None))
+        .values(used_at=_utcnow())
+    )
+    if int(getattr(result, "rowcount", 0) or 0) != 1:
+        await db.rollback()
+        return None
+    user = (await db.execute(select(User).where(User.id == row.user_id))).scalar_one_or_none()
+    await db.commit()
+    return user
+
+
+async def list_active_sessions(db: AsyncSession, user_id: str) -> list[dict]:
+    rows = list(
+        (
+            await db.execute(
+                select(RefreshToken)
+                .where(
+                    RefreshToken.user_id == user_id,
+                    RefreshToken.revoked_at.is_(None),
+                    RefreshToken.expires_at > _utcnow(),
+                )
+                .order_by(RefreshToken.created_at.desc())
+            )
+        ).scalars().all()
+    )
+    grouped: dict[str, list[RefreshToken]] = {}
+    for row in rows:
+        grouped.setdefault(row.family_id, []).append(row)
+    result: list[dict] = []
+    for family_id, family in grouped.items():
+        newest = max(family, key=lambda item: item.created_at)
+        oldest = min(family, key=lambda item: item.created_at)
+        result.append(
+            {
+                "family_id": family_id,
+                "created_at": oldest.created_at,
+                "last_seen_at": newest.created_at,
+                "expires_at": newest.expires_at,
+                "user_agent": newest.user_agent,
+                "ip": newest.ip,
+            }
+        )
+    return result

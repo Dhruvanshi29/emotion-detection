@@ -167,7 +167,7 @@ export default function MemoryPage() {
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
       <div className="flex items-baseline justify-between mb-1">
-        <h1 className="text-2xl font-semibold">Memory</h1>
+        <h1 className="text-2xl font-semibold">What Saaya remembers</h1>
         <button
           onClick={() => void deleteAll()}
           className="text-xs uppercase rounded-md border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 px-3 py-1 hover:bg-rose-50 dark:hover:bg-rose-950/30"

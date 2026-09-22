@@ -124,10 +124,10 @@ export default function TherapistsPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
-      <h1 className="text-2xl font-semibold mb-1">Find a therapist</h1>
+      <h1 className="text-2xl font-semibold mb-1">Find someone to talk to</h1>
       <p className="text-sm text-slate-600 dark:text-slate-400 mb-2">
-        A curated discovery tool. Filters below use only your stated criteria —
-        no AI ranking, no clinical referral.
+        Browse at your own pace. Results use only the preferences you choose —
+        never AI ranking or a clinical referral.
       </p>
       <p className="text-xs italic text-slate-500 mb-6">
         The platform does not endorse, employ, or supervise listed

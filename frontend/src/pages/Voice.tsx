@@ -25,6 +25,14 @@ type VoiceAnalyzeResponse = {
   emotion_model: string | null
 }
 
+type VoiceHistory = {
+  id: string
+  transcript: string
+  duration_seconds: number | null
+  speech_rate_wpm: number | null
+  created_at: string
+}
+
 const EMOJI: Record<string, string> = {
   joy: '😊',
   sadness: '😢',
@@ -48,6 +56,7 @@ export default function VoicePage() {
   const [result, setResult] = useState<VoiceAnalyzeResponse | null>(null)
   const [level, setLevel] = useState(0)
   const [elapsed, setElapsed] = useState(0)
+  const [history, setHistory] = useState<VoiceHistory[]>([])
 
   const recRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
@@ -64,6 +73,10 @@ export default function VoicePage() {
     return () => stopEverything()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    if (consent) void api.get<VoiceHistory[]>('/emotion/voice?limit=8').then((r) => setHistory(r.data)).catch(() => {})
+  }, [consent, result])
 
   function stopEverything() {
     if (rafRef.current !== null) {
@@ -217,7 +230,7 @@ export default function VoicePage() {
   if (!consent) {
     return (
       <div className="mx-auto max-w-2xl px-4 py-12">
-        <h1 className="text-2xl font-semibold mb-3">Voice check-in</h1>
+        <h1 className="text-2xl font-semibold mb-3">Speak only if it feels comfortable</h1>
         <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-800 p-5 text-sm">
           <p className="mb-3">
             Voice analysis is opt-in. Enable <strong>microphone consent</strong>{' '}
@@ -240,10 +253,10 @@ export default function VoicePage() {
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-8">
-      <h1 className="text-2xl font-semibold mb-2">Voice check-in</h1>
+      <h1 className="text-2xl font-semibold mb-2">A quiet voice check-in</h1>
       <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">
-        Speak freely for up to ~1 minute. These are gentle signals, not a
-        diagnosis. Raw audio is never stored.
+        A few words are enough. Pause whenever you need. These are gentle
+        signals, not a diagnosis, and raw audio is never stored.
       </p>
 
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 mb-6">
@@ -372,6 +385,14 @@ export default function VoicePage() {
           </div>
         </div>
       )}
+      <section className="mt-8">
+        <h2 className="font-semibold">Recent voice moments</h2>
+        <p className="mt-1 text-sm text-slate-500">Raw recordings are never saved. You can revisit only the private transcript and derived details.</p>
+        <div className="mt-3 space-y-2">
+          {history.length === 0 && <p className="text-sm italic text-slate-500">No earlier voice check-ins.</p>}
+          {history.map((item) => <article key={item.id} className="rounded-xl border border-slate-200 bg-white p-3 text-sm dark:border-slate-800 dark:bg-slate-900"><p className="line-clamp-2">{item.transcript}</p><small className="mt-1 block text-slate-500">{new Date(item.created_at).toLocaleString()} · {item.duration_seconds ? `${item.duration_seconds.toFixed(0)}s` : 'duration unavailable'} · {item.speech_rate_wpm ? `${item.speech_rate_wpm.toFixed(0)} wpm` : 'rate unavailable'}</small></article>)}
+        </div>
+      </section>
     </div>
   )
 }

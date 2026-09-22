@@ -23,6 +23,11 @@ verifying the release.
 | ---------------------------- | -------------------- | ---------------------------------------- |
 | `DATABASE_URL`               | Render (web service) | Neon pooled Postgres asyncpg URL         |
 | `JWT_SECRET` / `JWT_REFRESH_SECRET` | Render        | Generate: `python -c "import secrets;print(secrets.token_urlsafe(48))"` |
+| `FIELD_ENCRYPTION_KEY`       | Render + secure backup | Stable 32-byte hex/base64 key; losing it makes encrypted fields unreadable |
+| `FRONTEND_URL` / cookie settings | Render         | HTTPS frontend URL; use `Secure` and `SameSite=None` for cross-site hosting |
+| `SMTP_*`                     | Render               | Verification, recovery, and reminder email provider |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | Render | Browser Web Push credentials |
+| `THERAPIST_ADMIN_EMAILS`     | Render               | Comma-separated verified curator accounts |
 | `CORS_ALLOWED_ORIGINS`       | Render (web)         | e.g. `https://app.example.com`           |
 | `REDIS_URL`                  | Render (web)         | Shared production rate-limit backend     |
 | `SENTRY_DSN`                 | Render + Vercel      | Optional; enables error monitoring       |
@@ -72,7 +77,9 @@ Steps:
 1. In Vercel → **Add New → Project**, import the repo, set the root
    directory to `frontend/`.
 2. Set env vars `VITE_API_URL` and (optionally) `VITE_SENTRY_DSN`.
-3. Deploy. Add the custom domain `app.example.com`.
+3. Replace `https://api.example.com` in `frontend/vercel.json` with the final
+   API origin before deploying the CSP.
+4. Deploy. Add the custom domain `app.example.com`.
 
 ### Google Cloud Identity Platform (optional)
 
@@ -112,6 +119,9 @@ workflow**, paste the base URL, and verify PASS.
   requirements.
 - Weekly manual verification: restore latest backup to a scratch branch and
   run `alembic current` to confirm restored HEAD matches production.
+- The `Database backup restore drill` GitHub workflow automates this weekly and
+  can be run manually. Configure `BACKUP_SOURCE_DATABASE_URL` and a disposable
+  `BACKUP_RESTORE_DATABASE_URL`; never point both secrets at the same database.
 
 ## 6. Launch checks — run in this order
 

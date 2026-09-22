@@ -29,6 +29,9 @@ from app.models.memory import ConversationSummary, UserMemory  # noqa: F401
 from app.models.audit import AuditEvent, ConsentEvent  # noqa: F401
 from app.models.refresh_token import RefreshToken  # noqa: F401
 from app.models.auth_identity import AuthIdentity  # noqa: F401
+from app.models.auth_action import AuthActionToken  # noqa: F401
+from app.models.task_job import TaskJob  # noqa: F401
+from app.models.push_subscription import PushSubscription  # noqa: F401
 
 __all__ = [
     "User",
@@ -61,4 +64,7 @@ __all__ = [
     "ConsentEvent",
     "RefreshToken",
     "AuthIdentity",
+    "AuthActionToken",
+    "TaskJob",
+    "PushSubscription",
 ]

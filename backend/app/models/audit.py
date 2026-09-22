@@ -12,6 +12,7 @@ from typing import Any, Optional
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.crypto import EncryptedText
 from app.db.base import Base
 
 
@@ -76,7 +77,7 @@ class ConsentEvent(Base):
     kind: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
     granted: Mapped[bool] = mapped_column(Boolean, nullable=False)
     source: Mapped[str] = mapped_column(String(24), nullable=False, default="settings")
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(EncryptedText, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=_utcnow,

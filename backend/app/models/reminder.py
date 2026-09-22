@@ -27,6 +27,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.crypto import EncryptedText
 from app.db.base import Base
 
 
@@ -41,7 +42,7 @@ def _utcnow() -> datetime:
 REMINDER_KINDS = ("chat_checkin", "journal", "exercise", "hydration", "custom")
 RECURRENCE_KINDS = ("once", "daily", "weekly")
 NOTIFICATION_STATUSES = ("scheduled", "delivered", "read", "dismissed", "failed")
-NOTIFICATION_CHANNELS = ("in_app",)
+NOTIFICATION_CHANNELS = ("in_app", "email", "push")
 
 
 class Reminder(Base):
@@ -54,8 +55,8 @@ class Reminder(Base):
         index=True,
         nullable=False,
     )
-    title: Mapped[str] = mapped_column(String(120), nullable=False)
-    message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    title: Mapped[str] = mapped_column(EncryptedText, nullable=False)
+    message: Mapped[Optional[str]] = mapped_column(EncryptedText, nullable=True)
     kind: Mapped[str] = mapped_column(String(24), nullable=False, default="custom")
 
     recurrence: Mapped[str] = mapped_column(String(16), nullable=False, default="daily")
@@ -108,8 +109,8 @@ class Notification(Base):
     )
     kind: Mapped[str] = mapped_column(String(24), nullable=False, default="custom")
     channel: Mapped[str] = mapped_column(String(16), nullable=False, default="in_app")
-    title: Mapped[str] = mapped_column(String(160), nullable=False)
-    body: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    title: Mapped[str] = mapped_column(EncryptedText, nullable=False)
+    body: Mapped[Optional[str]] = mapped_column(EncryptedText, nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="delivered")
 
     scheduled_for: Mapped[datetime] = mapped_column(
@@ -121,6 +122,8 @@ class Notification(Base):
     read_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    delivery_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_attempt_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, server_default=func.now(), nullable=False
     )

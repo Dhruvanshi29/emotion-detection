@@ -1,0 +1,36 @@
+name: Database backup restore drill
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+jobs:
+  restore-drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require isolated database secrets
+        env:
+          SOURCE_DATABASE_URL: ${{ secrets.BACKUP_SOURCE_DATABASE_URL }}
+          RESTORE_DATABASE_URL: ${{ secrets.BACKUP_RESTORE_DATABASE_URL }}
+        run: |
+          test -n "$SOURCE_DATABASE_URL"
+          test -n "$RESTORE_DATABASE_URL"
+          test "$SOURCE_DATABASE_URL" != "$RESTORE_DATABASE_URL"
+      - name: Dump encrypted production database connection
+        env:
+          SOURCE_DATABASE_URL: ${{ secrets.BACKUP_SOURCE_DATABASE_URL }}
+        run: pg_dump "$SOURCE_DATABASE_URL" --format=custom --no-owner --no-acl --file="$RUNNER_TEMP/saaya.dump"
+      - name: Restore into disposable drill database
+        env:
+          RESTORE_DATABASE_URL: ${{ secrets.BACKUP_RESTORE_DATABASE_URL }}
+        run: pg_restore "$RESTORE_DATABASE_URL" --clean --if-exists --no-owner --no-acl "$RUNNER_TEMP/saaya.dump"
+      - name: Verify schema and essential tables
+        env:
+          RESTORE_DATABASE_URL: ${{ secrets.BACKUP_RESTORE_DATABASE_URL }}
+        run: |
+          psql "$RESTORE_DATABASE_URL" -v ON_ERROR_STOP=1 -c "select version_num from alembic_version;"
+          psql "$RESTORE_DATABASE_URL" -v ON_ERROR_STOP=1 -c "select count(*) >= 0 as users_readable from users;"
+          psql "$RESTORE_DATABASE_URL" -v ON_ERROR_STOP=1 -c "select count(*) >= 0 as messages_readable from messages;"

@@ -15,7 +15,7 @@ import logging
 
 from app.core.config import get_settings
 from app.db import session as _session_mod
-from app.services import reminders_service, retention_service
+from app.services import reminders_service, retention_service, task_queue
 
 settings = get_settings()
 logging.basicConfig(level=settings.log_level.upper())
@@ -27,8 +27,17 @@ async def _loop(interval_seconds: float) -> None:
         try:
             async with _session_mod.SessionLocal() as db:
                 created = await reminders_service.dispatch_due(db)
+                delivered = await reminders_service.deliver_pending_email_notifications(db)
+                pushed = await reminders_service.deliver_pending_push_notifications(db)
+                jobs = await task_queue.process_pending(db)
                 if created:
                     log.info("reminders: dispatched %d notifications", created)
+                if delivered:
+                    log.info("reminders: delivered %d emails", delivered)
+                if pushed:
+                    log.info("reminders: delivered %d push notifications", pushed)
+                if jobs:
+                    log.info("tasks: completed %d durable jobs", jobs)
         except Exception as e:  # noqa: BLE001
             log.warning("reminders: dispatch failed (%s)", e)
         await asyncio.sleep(interval_seconds)

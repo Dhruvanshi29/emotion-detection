@@ -13,7 +13,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.reminder import Notification, Reminder
+from app.models.user import User, UserPreferences
 from app.schemas.reminder import ReminderCreate, ReminderUpdate
+from app.services import email_service, push_service
+from app.models.push_subscription import PushSubscription
 
 
 def _parse_hhmm(s: str) -> time:
@@ -217,6 +220,7 @@ async def dispatch_due(
         .where(Reminder.next_fire_at <= now)
         .order_by(Reminder.next_fire_at.asc())
         .limit(limit)
+        .with_for_update(skip_locked=True)
     )
     rows = list((await db.execute(q)).scalars().all())
     created = 0
@@ -234,6 +238,46 @@ async def dispatch_due(
             delivered_at=now,
         )
         db.add(notif)
+        if email_service.configured():
+            prefs = (
+                await db.execute(
+                    select(UserPreferences).where(UserPreferences.user_id == r.user_id)
+                )
+            ).scalar_one_or_none()
+            if prefs is not None and prefs.notification_email:
+                db.add(
+                    Notification(
+                        user_id=r.user_id,
+                        reminder_id=r.id,
+                        kind=r.kind,
+                        channel="email",
+                        title=r.title,
+                        body=r.message,
+                        status="scheduled",
+                        scheduled_for=scheduled,
+                    )
+                )
+        if push_service.configured():
+            has_push = (
+                await db.execute(
+                    select(PushSubscription.id)
+                    .where(PushSubscription.user_id == r.user_id)
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if has_push is not None:
+                db.add(
+                    Notification(
+                        user_id=r.user_id,
+                        reminder_id=r.id,
+                        kind=r.kind,
+                        channel="push",
+                        title=r.title,
+                        body=r.message,
+                        status="scheduled",
+                        scheduled_for=scheduled,
+                    )
+                )
         r.last_fired_at = now
         r.fire_count = (r.fire_count or 0) + 1
         await _apply_next_fire(r, from_utc=now)
@@ -241,6 +285,82 @@ async def dispatch_due(
     if created:
         await db.commit()
     return created
+
+
+async def deliver_pending_email_notifications(
+    db: AsyncSession, *, limit: int = 50
+) -> int:
+    """Deliver queued reminder emails with bounded retries."""
+    if not email_service.configured():
+        return 0
+    rows = list(
+        (
+            await db.execute(
+                select(Notification, User.email)
+                .join(User, User.id == Notification.user_id)
+                .where(
+                    Notification.channel == "email",
+                    Notification.status.in_(("scheduled", "failed")),
+                    Notification.delivery_attempts < 3,
+                )
+                .order_by(Notification.created_at.asc())
+                .limit(limit)
+            )
+        ).all()
+    )
+    delivered = 0
+    for notification, email in rows:
+        notification.delivery_attempts += 1
+        notification.last_attempt_at = datetime.now(timezone.utc)
+        ok = await email_service.send_email(
+            to=email,
+            subject=f"Saaya reminder: {notification.title}",
+            text=notification.body or notification.title,
+        )
+        notification.status = "delivered" if ok else "failed"
+        if ok:
+            notification.delivered_at = datetime.now(timezone.utc)
+            delivered += 1
+    if rows:
+        await db.commit()
+    return delivered
+
+
+async def deliver_pending_push_notifications(db: AsyncSession, *, limit: int = 50) -> int:
+    """Deliver durable Web Push outbox rows with bounded retries."""
+    if not push_service.configured():
+        return 0
+    rows = list(
+        (
+            await db.execute(
+                select(Notification)
+                .where(
+                    Notification.channel == "push",
+                    Notification.status.in_(("scheduled", "failed")),
+                    Notification.delivery_attempts < 3,
+                )
+                .order_by(Notification.created_at.asc())
+                .limit(limit)
+            )
+        ).scalars().all()
+    )
+    delivered = 0
+    for notification in rows:
+        notification.delivery_attempts += 1
+        notification.last_attempt_at = datetime.now(timezone.utc)
+        ok = await push_service.send_user(
+            db,
+            user_id=notification.user_id,
+            title=notification.title,
+            body=notification.body or notification.title,
+        )
+        notification.status = "delivered" if ok else "failed"
+        if ok:
+            notification.delivered_at = datetime.now(timezone.utc)
+            delivered += 1
+    if rows:
+        await db.commit()
+    return delivered
 
 
 async def list_notifications(
@@ -251,7 +371,11 @@ async def list_notifications(
     limit: int = 50,
     skip: int = 0,
 ) -> Tuple[List[Notification], int, int]:
-    base = select(Notification).where(Notification.user_id == user_id)
+    # Email delivery rows are an internal durable outbox. Only in-app rows
+    # belong in the user's notification centre and unread badge.
+    base = select(Notification).where(
+        Notification.user_id == user_id, Notification.channel == "in_app"
+    )
     if unread_only:
         base = base.where(Notification.read_at.is_(None))
     total = (
@@ -261,7 +385,11 @@ async def list_notifications(
     ).scalar_one()
     unread_q = select(func.count()).select_from(
         select(Notification)
-        .where(Notification.user_id == user_id, Notification.read_at.is_(None))
+        .where(
+            Notification.user_id == user_id,
+            Notification.channel == "in_app",
+            Notification.read_at.is_(None),
+        )
         .subquery()
     )
     unread = (await db.execute(unread_q)).scalar_one()
@@ -300,6 +428,8 @@ __all__ = [
     "update_reminder",
     "delete_reminder",
     "dispatch_due",
+    "deliver_pending_email_notifications",
+    "deliver_pending_push_notifications",
     "list_notifications",
     "get_notification",
     "mark_notification",

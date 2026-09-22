@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { api } from '../lib/api'
 
@@ -226,6 +226,8 @@ function RiskBadge({ level }: { level: string | null }) {
 
 export default function DashboardPage() {
   const [windowDays, setWindowDays] = useState(7)
+  const [moodNote, setMoodNote] = useState('')
+  const [checkedMood, setCheckedMood] = useState<string | null>(null)
   const dashboardQuery = useQuery({
     queryKey: ['dashboard', windowDays],
     queryFn: async () => {
@@ -253,6 +255,21 @@ export default function DashboardPage() {
     ? queryError.response?.data?.detail || queryError.message || 'Failed to load'
     : null
 
+  const checkIn = useMutation({
+    mutationFn: async (mood: string) => {
+      const text = moodNote.trim()
+        ? `I feel ${mood} today. ${moodNote.trim()}`
+        : `I feel ${mood} today.`
+      await api.post('/emotion/text', { text, source: 'adhoc' })
+      return mood
+    },
+    onSuccess: async (mood) => {
+      setCheckedMood(mood)
+      setMoodNote('')
+      await dashboardQuery.refetch()
+    },
+  })
+
   const momentumLabel = useMemo(() => {
     if (!trends) return null
     return {
@@ -267,9 +284,9 @@ export default function DashboardPage() {
     <div className="mx-auto max-w-6xl px-4 py-8">
       <div className="flex items-baseline justify-between mb-4">
         <div>
-          <h1 className="text-2xl font-semibold">Your dashboard</h1>
+          <h1 className="text-2xl font-semibold">A gentle place to begin</h1>
           <p className="text-sm text-slate-600 dark:text-slate-400">
-            Signals, patterns and progress — not a clinical assessment.
+            Notice what feels useful today. There is nothing you need to complete.
           </p>
         </div>
         <div>
@@ -288,6 +305,45 @@ export default function DashboardPage() {
           </select>
         </div>
       </div>
+
+      <section className="mb-6 rounded-2xl border border-emerald-900/10 bg-emerald-50/70 p-4 dark:border-emerald-200/10 dark:bg-emerald-950/20" aria-labelledby="quick-check-in-title">
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div className="min-w-0 flex-1">
+            <h2 id="quick-check-in-title" className="font-semibold">How are you arriving right now?</h2>
+            <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">One tap is enough. Add a note only if it feels helpful.</p>
+            <input
+              value={moodNote}
+              onChange={(event) => setMoodNote(event.target.value)}
+              maxLength={240}
+              placeholder="A few words, if you want…"
+              className="mt-3 w-full rounded-xl border border-slate-300 bg-white/80 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+              aria-label="Optional mood note"
+            />
+          </div>
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Choose today's feeling">
+            {[
+              ['heavy', '😔'],
+              ['tender', '🥹'],
+              ['steady', '😌'],
+              ['hopeful', '🌤️'],
+              ['light', '😊'],
+            ].map(([label, emoji]) => (
+              <button
+                key={label}
+                type="button"
+                disabled={checkIn.isPending}
+                onClick={() => checkIn.mutate(label)}
+                className="rounded-full border border-emerald-900/15 bg-white px-3 py-2 text-sm capitalize transition hover:-translate-y-0.5 hover:shadow-sm disabled:opacity-50 dark:bg-slate-900"
+                aria-pressed={checkedMood === label}
+              >
+                <span aria-hidden="true">{emoji}</span> {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {checkedMood && !checkIn.isPending && <p className="mt-3 text-xs text-emerald-800 dark:text-emerald-300">Noted gently. You do not need to do anything else.</p>}
+        {checkIn.isError && <p className="mt-3 text-xs text-rose-700">That check-in did not save. Please try once more.</p>}
+      </section>
 
       {error && (
         <div className="mb-4 rounded-md border border-rose-300 bg-rose-50 dark:bg-rose-950/30 dark:border-rose-800 p-3 text-sm text-rose-800 dark:text-rose-200">

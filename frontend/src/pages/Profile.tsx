@@ -3,6 +3,8 @@ import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { api } from '../lib/api'
 import { useAuth } from '../lib/auth'
+import { getGoogleIdentityToken, googleAuthConfigured } from '../lib/googleAuth'
+import { disablePush, enablePush, pushAvailability } from '../lib/push'
 
 const schema = z.object({
   display_name: z.string().max(80).optional().or(z.literal('')),
@@ -36,12 +38,31 @@ const passwordSchema = z
   })
 type PasswordForm = z.infer<typeof passwordSchema>
 
+type DeviceSession = {
+  family_id: string
+  created_at: string
+  last_seen_at: string
+  expires_at: string
+  user_agent: string | null
+  ip: string | null
+}
+
+type MFASetup = { secret: string; otpauth_uri: string }
+
 export default function ProfilePage() {
   const { user, refreshMe, logoutAll, changePassword } = useAuth()
   const [status, setStatus] = useState<string | null>(null)
   const [pwStatus, setPwStatus] = useState<string | null>(null)
   const [pwError, setPwError] = useState<string | null>(null)
   const [logoutBusy, setLogoutBusy] = useState(false)
+  const [sessions, setSessions] = useState<DeviceSession[]>([])
+  const [verifyStatus, setVerifyStatus] = useState<string | null>(null)
+  const [mfaSetup, setMfaSetup] = useState<MFASetup | null>(null)
+  const [mfaCode, setMfaCode] = useState('')
+  const [mfaPassword, setMfaPassword] = useState('')
+  const [securityStatus, setSecurityStatus] = useState<string | null>(null)
+  const [pushAvailable, setPushAvailable] = useState(false)
+  const [pushStatus, setPushStatus] = useState<string | null>(null)
   const {
     register,
     handleSubmit,
@@ -74,11 +95,22 @@ export default function ProfilePage() {
     }
   }, [user, reset])
 
+  useEffect(() => {
+    if (user) void api.get<DeviceSession[]>('/auth/sessions').then((r) => setSessions(r.data)).catch(() => setSessions([]))
+  }, [user])
+
+  useEffect(() => {
+    if (user) void pushAvailability().then(setPushAvailable).catch(() => setPushAvailable(false))
+  }, [user])
+
   if (!user) return null
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-10">
-      <h1 className="text-2xl font-semibold mb-6">Your profile</h1>
+      <h1 className="text-2xl font-semibold mb-2">Your space, your way</h1>
+      <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">
+        Adjust only what matters to you. Everything here can be changed later.
+      </p>
       <form
         className="space-y-5"
         onSubmit={handleSubmit(async (data) => {
@@ -93,6 +125,11 @@ export default function ProfilePage() {
       >
         <section className="space-y-3">
           <h2 className="font-medium">Profile</h2>
+          <div className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 dark:bg-slate-800 p-3">
+            <div><span className="block text-sm font-medium">Email {user.is_verified ? 'verified' : 'not yet verified'}</span><small className="text-slate-500">{user.email}</small></div>
+            {!user.is_verified && <button type="button" className="rounded-md border border-slate-300 px-3 py-1.5 text-xs" onClick={async () => { await api.post('/auth/email/verify/request'); setVerifyStatus('Verification email requested.') }}>Send verification</button>}
+          </div>
+          {verifyStatus && <p className="text-xs text-green-700">{verifyStatus}</p>}
           <div>
             <label className="block text-sm mb-1">Display name</label>
             <input
@@ -156,6 +193,7 @@ export default function ProfilePage() {
             <input type="checkbox" {...register('notification_email')} />
             <span className="text-sm">Email me gentle reminders</span>
           </label>
+          {pushAvailable && <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-700"><p className="text-sm font-medium">Browser reminders</p><p className="mt-1 text-xs text-slate-500">Optional notifications on this device. The reminder text is sent only through your browser's push service.</p><div className="mt-2 flex gap-3"><button type="button" className="text-sm text-indigo-600" onClick={async () => { try { await enablePush(); setPushStatus('Browser reminders enabled on this device.') } catch (error) { setPushStatus(error instanceof Error ? error.message : 'Could not enable browser reminders.') } }}>Enable on this device</button><button type="button" className="text-sm text-slate-500" onClick={async () => { await disablePush(); setPushStatus('Browser reminders disabled on this device.') }}>Disable</button></div>{pushStatus && <p className="mt-2 text-xs text-slate-600">{pushStatus}</p>}</div>}
         </section>
 
         <div className="flex items-center gap-3">
@@ -172,6 +210,18 @@ export default function ProfilePage() {
 
       <section className="mt-10 border-t border-slate-200 dark:border-slate-800 pt-8 space-y-4">
         <h2 className="text-lg font-semibold">Security</h2>
+
+        <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+          <div className="flex items-start justify-between gap-4">
+            <div><h3 className="font-medium">Authenticator verification</h3><p className="mt-1 text-sm text-slate-500">Add a six-digit code from your authenticator app when signing in.</p></div>
+            <span className={`rounded-full px-2 py-1 text-xs ${user.mfa_enabled ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}`}>{user.mfa_enabled ? 'On' : 'Off'}</span>
+          </div>
+          {!user.mfa_enabled && !mfaSetup && <div className="mt-3 flex gap-2"><input type="password" value={mfaPassword} onChange={(e) => setMfaPassword(e.target.value)} placeholder="Current password" autoComplete="current-password" className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900" /><button type="button" disabled={!mfaPassword} className="rounded-md border border-slate-300 px-3 py-2 text-sm disabled:opacity-50" onClick={async () => { setSecurityStatus(null); const r = await api.post<MFASetup>('/auth/mfa/setup', { password: mfaPassword }); setMfaPassword(''); setMfaSetup(r.data) }}>Set up authenticator</button></div>}
+          {mfaSetup && !user.mfa_enabled && <div className="mt-4 space-y-3 rounded-lg bg-slate-50 p-3 dark:bg-slate-800"><p className="text-sm">Add this setup key to your authenticator app:</p><code className="block break-all rounded bg-white p-2 text-sm dark:bg-slate-900">{mfaSetup.secret}</code><a className="text-sm text-indigo-600 underline" href={mfaSetup.otpauth_uri}>Open in an authenticator app</a><div className="flex gap-2"><input value={mfaCode} onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" placeholder="6-digit code" className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900" /><button type="button" disabled={mfaCode.length !== 6} className="rounded-md bg-indigo-600 px-3 py-2 text-sm text-white disabled:opacity-50" onClick={async () => { await api.post('/auth/mfa/confirm', { code: mfaCode }); setMfaSetup(null); setMfaCode(''); await refreshMe(); setSecurityStatus('Authenticator verification is now on.') }}>Confirm</button></div></div>}
+          {user.mfa_enabled && <div className="mt-3 space-y-2"><div className="flex gap-2"><input type="password" value={mfaPassword} onChange={(e) => setMfaPassword(e.target.value)} placeholder="Current password" className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900" /><input value={mfaCode} onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" placeholder="6-digit code" className="w-36 rounded-md border border-slate-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900" /></div><button type="button" className="text-sm text-red-600" onClick={async () => { await api.delete('/auth/mfa', { data: { password: mfaPassword, code: mfaCode } }); setMfaPassword(''); setMfaCode(''); await refreshMe(); setSecurityStatus('Authenticator verification is now off.') }}>Turn off authenticator verification</button></div>}
+          {googleAuthConfigured && <button type="button" className="mt-4 block text-sm text-indigo-600" onClick={async () => { const idToken = await getGoogleIdentityToken(); await api.post('/auth/google/link', { id_token: idToken }); await refreshMe(); setSecurityStatus('Google account linked securely.') }}>Link this account with Google</button>}
+          {securityStatus && <p className="mt-3 text-sm text-emerald-700">{securityStatus}</p>}
+        </div>
 
         <form
           className="space-y-3"
@@ -241,6 +291,13 @@ export default function ProfilePage() {
         </form>
 
         <div className="pt-4 border-t border-slate-200 dark:border-slate-800">
+          <h3 className="font-medium">Active sessions</h3>
+          <p className="text-sm text-slate-600 dark:text-slate-400 mt-1 mb-3">Review devices that can refresh access to your account.</p>
+          <div className="space-y-2 mb-5">
+            {sessions.length === 0 && <p className="text-sm text-slate-500">No active refresh sessions found.</p>}
+            {sessions.map((session) => <div key={session.family_id} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 dark:bg-slate-800 p-3"><div className="min-w-0"><strong className="block truncate text-sm">{session.user_agent || 'Unknown browser'}</strong><small className="text-slate-500">Last active {new Date(session.last_seen_at).toLocaleString()} · {session.ip || 'IP unavailable'}</small></div><button type="button" className="text-xs text-red-600" onClick={async () => { await api.delete(`/auth/sessions/${session.family_id}`); setSessions((items) => items.filter((item) => item.family_id !== session.family_id)) }}>Revoke</button></div>)}
+          </div>
+
           <h3 className="font-medium">Sign out everywhere</h3>
           <p className="text-sm text-slate-600 dark:text-slate-400 mt-1 mb-3">
             Revoke sessions on all your devices. You'll need to sign in again.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import base64
 from pathlib import Path
 from typing import List
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -48,6 +49,31 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_access_ttl_minutes: int = 30
     jwt_refresh_ttl_days: int = 30
+    # Browser sessions keep refresh credentials in a Secure HttpOnly cookie.
+    auth_cookie_name: str = "saaya_refresh"
+    csrf_cookie_name: str = "saaya_csrf"
+    auth_cookie_domain: str = ""
+    auth_cookie_secure: bool = False
+    auth_cookie_samesite: str = "lax"
+    frontend_url: str = "http://localhost:5173"
+
+    # Optional SMTP delivery. Empty host keeps email delivery disabled while
+    # preserving verification/reset token issuance and in-app notifications.
+    smtp_host: str = ""
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_starttls: bool = True
+
+    # Optional Web Push delivery (VAPID). Leave blank to hide push controls.
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+    vapid_subject: str = "mailto:support@example.com"
+
+    # Comma-separated verified account emails allowed to curate therapist
+    # profiles and review reports. Empty means the admin API is closed.
+    therapist_admin_emails: str = ""
 
     # Google Cloud Identity Platform / Firebase Auth. Empty disables Google
     # sign-in while preserving local email/password auth.
@@ -103,6 +129,11 @@ class Settings(BaseSettings):
     # ---------- Memory (Phase 11) ----------
     memory_embedding_dims: int = Field(default=256, ge=32, le=4096)
     memory_retrieve_default_k: int = Field(default=5, ge=1, le=25)
+    # Optional OpenAI-compatible embedding endpoint. Empty values preserve the
+    # deterministic local fallback for development and offline operation.
+    embedding_api_base: str = ""
+    embedding_api_key: str = ""
+    embedding_model: str = "text-embedding-3-small"
 
     # ---------- Rate limits (Phase 12) ----------
     # Off in tests so noisy loops don't need per-test resets.
@@ -239,6 +270,19 @@ class Settings(BaseSettings):
                 raise ValueError("JWT_SECRET and JWT_REFRESH_SECRET must be different")
             if self.jwt_algorithm not in {"HS256", "HS384", "HS512"}:
                 raise ValueError("JWT_ALGORITHM must be an approved HMAC algorithm")
+            if not self.auth_cookie_secure:
+                raise ValueError("AUTH_COOKIE_SECURE must be true in production")
+            if self.auth_cookie_samesite.lower() not in {"lax", "strict", "none"}:
+                raise ValueError("AUTH_COOKIE_SAMESITE must be lax, strict, or none")
+        if not self.field_encryption_key:
+            raise ValueError("FIELD_ENCRYPTION_KEY is required in production")
+        try:
+            raw_key = self.field_encryption_key.strip()
+            key = bytes.fromhex(raw_key) if len(raw_key) == 64 else base64.urlsafe_b64decode(raw_key + "=" * (-len(raw_key) % 4))
+        except (ValueError, TypeError) as exc:
+            raise ValueError("FIELD_ENCRYPTION_KEY must be valid hex or base64") from exc
+        if len(key) != 32:
+            raise ValueError("FIELD_ENCRYPTION_KEY must decode to exactly 32 bytes")
         return self
 
     @property
@@ -252,6 +296,10 @@ class Settings(BaseSettings):
             for o in self.cors_allowed_origins.split(",")
             if o.strip()
         ]
+
+    @property
+    def therapist_admin_emails_list(self) -> List[str]:
+        return [email.strip().lower() for email in self.therapist_admin_emails.split(",") if email.strip()]
 
     @property
     def is_production(self) -> bool:

@@ -29,6 +29,7 @@ class UserOut(BaseModel):
     email: EmailStr
     is_active: bool
     is_verified: bool
+    mfa_enabled: bool = False
     created_at: datetime
     profile: Optional[UserProfileOut] = None
     preferences: Optional[UserPreferencesOut] = None

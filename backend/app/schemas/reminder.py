@@ -208,6 +208,21 @@ class NotificationStatusUpdate(BaseModel):
         return v
 
 
+class PushSubscriptionCreate(BaseModel):
+    endpoint: str = Field(min_length=10, max_length=4096)
+    p256dh: str = Field(min_length=10, max_length=1024)
+    auth: str = Field(min_length=8, max_length=512)
+
+
+class PushSubscriptionDelete(BaseModel):
+    endpoint: str = Field(min_length=10, max_length=4096)
+
+
+class PushConfig(BaseModel):
+    enabled: bool
+    public_key: str | None = None
+
+
 __all__ = [
     "ReminderCreate",
     "ReminderUpdate",
@@ -216,4 +231,7 @@ __all__ = [
     "NotificationRead",
     "NotificationList",
     "NotificationStatusUpdate",
+    "PushSubscriptionCreate",
+    "PushSubscriptionDelete",
+    "PushConfig",
 ]

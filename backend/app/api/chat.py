@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from typing import Annotated, List
+import asyncio
+import json
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +22,8 @@ from app.schemas.chat import (
     ProvidersStatus,
 )
 from app.services import chat_service, emotion_service
+from app.services import task_queue
+from app.core.config import get_settings
 from app.services.ai.llm import ChatMessage, LLMProviderError
 from app.services.emotion import EmotionAnalyzer
 
@@ -97,13 +101,25 @@ async def chat_message(
     except LookupError:
         raise HTTPException(status_code=404, detail="conversation not found")
 
-    background.add_task(
-        _analyze_message_bg,
-        analyzer,
-        user_id=user.id,
-        message_id=result.user_message.id,
-        text=result.user_message.content,
-    )
+    if get_settings().is_production:
+        await task_queue.enqueue(
+            db,
+            kind="chat_emotion",
+            dedupe_key=f"chat-emotion:{result.user_message.id}",
+            payload={
+                "user_id": user.id,
+                "message_id": result.user_message.id,
+                "text": result.user_message.content,
+            },
+        )
+    else:
+        background.add_task(
+            _analyze_message_bg,
+            analyzer,
+            user_id=user.id,
+            message_id=result.user_message.id,
+            text=result.user_message.content,
+        )
 
     a = result.assistant_message
     return ChatSendResponse(
@@ -117,6 +133,75 @@ async def chat_message(
         prompt_tokens=a.prompt_tokens,
         completion_tokens=a.completion_tokens,
     )
+
+
+@router.post("/message/stream")
+async def chat_message_stream(
+    req: ChatSendRequest,
+    user: CurrentUser,
+    db: DbDep,
+    llm: LLMRouterDep,
+    analyzer: EmotionAnalyzerDep,
+    background: BackgroundTasks,
+    _rl: None = Depends(
+        rate_limit("chat_stream", limit_setting="chat_rate_limit_per_minute", window_seconds=60.0)
+    ),
+):
+    """Persist a safe chat turn and return its approved text over SSE.
+
+    Output is buffered through the safety scanner before any text reaches the
+    browser, then emitted progressively. This intentionally favors safety over
+    exposing raw provider-token streams.
+    """
+    try:
+        result = await chat_service.send_message(
+            db,
+            llm,
+            user_id=user.id,
+            conversation_id=req.conversation_id,
+            content=req.content,
+            provider=req.provider,
+            max_tokens=req.max_tokens,
+            temperature=req.temperature,
+        )
+    except LookupError:
+        raise HTTPException(status_code=404, detail="conversation not found")
+
+    if get_settings().is_production:
+        await task_queue.enqueue(
+            db,
+            kind="chat_emotion",
+            dedupe_key=f"chat-emotion:{result.user_message.id}",
+            payload={"user_id": user.id, "message_id": result.user_message.id, "text": result.user_message.content},
+        )
+    else:
+        background.add_task(
+            _analyze_message_bg,
+            analyzer,
+            user_id=user.id,
+            message_id=result.user_message.id,
+            text=result.user_message.content,
+        )
+
+    assistant = result.assistant_message
+    meta = {
+        "conversation_id": result.conversation.id,
+        "user_message_id": result.user_message.id,
+        "assistant_message_id": assistant.id,
+        "text": assistant.content,
+        "risk_level": result.risk_level,
+        "provider": assistant.provider,
+        "model": assistant.model,
+    }
+
+    async def event_source():
+        words = assistant.content.split(" ")
+        for index, word in enumerate(words):
+            yield {"event": "delta", "data": word + (" " if index < len(words) - 1 else "")}
+            await asyncio.sleep(0)
+        yield {"event": "done", "data": json.dumps(meta)}
+
+    return EventSourceResponse(event_source())
 
 
 @router.get("/conversations", response_model=List[ConversationRead])

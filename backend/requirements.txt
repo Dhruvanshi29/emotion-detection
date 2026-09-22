@@ -23,6 +23,8 @@ prometheus-client>=0.21,<1.0
 cryptography>=44.0,<52.0
 # Optional Redis for shared idempotency / rate-limit stores (Phase 15 P1 §5.5).
 redis>=5.0,<6.0
+# Optional browser push notifications; inactive unless VAPID keys are set.
+pywebpush>=2.0,<3.0
 # Verify Google Cloud Identity Platform / Firebase ID tokens, including the
 # requests-based HTTP transport used to fetch Google's signing certificates.
 google-auth[requests]>=2.35,<3.0

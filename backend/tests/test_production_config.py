@@ -15,6 +15,8 @@ def _production(**overrides) -> Settings:
         "cors_allowed_origins": "https://app.example.com",
         "jwt_secret": "a" * 48,
         "jwt_refresh_secret": "b" * 48,
+        "auth_cookie_secure": True,
+        "field_encryption_key": "11" * 32,
     }
     values.update(overrides)
     return Settings(_env_file=None, **values)
@@ -46,6 +48,7 @@ def test_production_worker_only_requires_database_settings():
             "postgresql://user:password@db-pooler.example.com/app"
             "?sslmode=require&channel_binding=require"
         ),
+        field_encryption_key="22" * 32,
     )
     assert settings.app_role == "worker"
 
@@ -61,6 +64,8 @@ def test_production_worker_only_requires_database_settings():
         {"jwt_refresh_secret": "short"},
         {"jwt_refresh_secret": "a" * 48},
         {"jwt_algorithm": "none"},
+        {"auth_cookie_secure": False},
+        {"field_encryption_key": ""},
     ],
 )
 def test_unsafe_production_settings_are_rejected(overrides):

@@ -141,10 +141,10 @@ export default function PrivacyPage() {
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-8">
-      <h1 className="text-2xl font-semibold mb-1">Privacy &amp; safety</h1>
+      <h1 className="text-2xl font-semibold mb-1">Your privacy, your choice</h1>
       <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">
-        You control what the platform remembers, records, and shares. AI
-        signals here are not a clinical diagnosis.
+        You are always in control of what Saaya remembers and records. Take
+        these settings one at a time; you can change them whenever you wish.
       </p>
 
       {error && (

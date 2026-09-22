@@ -170,7 +170,7 @@ export default function RemindersPage() {
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
-      <h1 className="text-2xl font-semibold mb-1">Reminders</h1>
+      <h1 className="text-2xl font-semibold mb-1">Gentle reminders</h1>
       <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">
         Gentle nudges for check-ins, journaling and wellness exercises.
         Timezone-aware; you can pause any reminder at any time.

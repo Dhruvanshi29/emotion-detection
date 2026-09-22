@@ -5,7 +5,7 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.models.therapist import REPORT_KINDS
+from app.models.therapist import REPORT_KINDS, REPORT_STATUSES, VERIFICATION_STATUSES
 
 
 class TherapistAvailabilitySlot(BaseModel):
@@ -105,3 +105,52 @@ class TherapistReportRead(BaseModel):
     notes: Optional[str] = None
     status: str
     created_at: datetime
+
+
+class TherapistAdminCreate(BaseModel):
+    slug: str = Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$", max_length=80)
+    full_name: str = Field(min_length=2, max_length=160)
+    title: str = Field(min_length=2, max_length=120)
+    bio: str = Field(min_length=10, max_length=5000)
+    country_code: str = Field(min_length=2, max_length=2)
+    city: Optional[str] = Field(default=None, max_length=80)
+    timezone: Optional[str] = Field(default=None, max_length=64)
+    session_price_min: Optional[float] = Field(default=None, ge=0)
+    session_price_max: Optional[float] = Field(default=None, ge=0)
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    offers_online: bool = True
+    offers_in_person: bool = False
+    accepts_new_clients: bool = True
+    contact_email: Optional[str] = Field(default=None, max_length=255)
+    website_url: Optional[str] = Field(default=None, max_length=400)
+    photo_url: Optional[str] = Field(default=None, max_length=400)
+    specializations: List[str] = Field(default_factory=list, max_length=30)
+    languages: List[str] = Field(default_factory=list, max_length=20)
+    availability: List[TherapistAvailabilitySlot] = Field(default_factory=list, max_length=30)
+
+
+class TherapistVerificationUpdate(BaseModel):
+    status: str
+    license_number: Optional[str] = Field(default=None, max_length=120)
+    license_authority: Optional[str] = Field(default=None, max_length=200)
+    expires_at: Optional[datetime] = None
+    notes: Optional[str] = Field(default=None, max_length=2000)
+
+    @field_validator("status")
+    @classmethod
+    def _status(cls, value: str) -> str:
+        if value not in VERIFICATION_STATUSES:
+            raise ValueError("invalid verification status")
+        return value
+
+
+class TherapistReportStatusUpdate(BaseModel):
+    status: str
+    notes: Optional[str] = Field(default=None, max_length=2000)
+
+    @field_validator("status")
+    @classmethod
+    def _report_status(cls, value: str) -> str:
+        if value not in REPORT_STATUSES:
+            raise ValueError("invalid report status")
+        return value

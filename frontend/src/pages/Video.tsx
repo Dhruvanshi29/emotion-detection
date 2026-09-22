@@ -29,6 +29,8 @@ type FacialAnalyzeResponse = {
   model_name: string | null
 }
 
+type FacialHistory = FacialAnalyzeResponse & { id: string; created_at: string }
+
 const EMOJI: Record<string, string> = {
   joy: '😊',
   sadness: '😢',
@@ -45,6 +47,8 @@ type FrameSignal = {
   motion: number
   skinRatio: number
 }
+
+type NativeFaceDetector = { detect: (source: HTMLVideoElement) => Promise<unknown[]> }
 
 // Runs entirely in the browser — no pixels ever leave the device.
 function analyzeFrame(
@@ -159,6 +163,7 @@ export default function VideoPage() {
   const [result, setResult] = useState<FacialAnalyzeResponse | null>(null)
   const [elapsed, setElapsed] = useState(0)
   const [previewMeter, setPreviewMeter] = useState({ face: 0, motion: 0 })
+  const [history, setHistory] = useState<FacialHistory[]>([])
 
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -168,6 +173,7 @@ export default function VideoPage() {
   const startedAtRef = useRef<number>(0)
   const samplesRef = useRef<FrameSignal[]>([])
   const prevPixelsRef = useRef<Uint8ClampedArray | null>(null)
+  const detectorRef = useRef<NativeFaceDetector | null>(null)
 
   const consent = user?.preferences.camera_consent === true
 
@@ -190,12 +196,18 @@ export default function VideoPage() {
     return () => stopEverything()
   }, [stopEverything])
 
+  useEffect(() => {
+    if (consent) void api.get<FacialHistory[]>('/emotion/face?limit=8').then((r) => setHistory(r.data)).catch(() => {})
+  }, [consent, result])
+
   async function start() {
     setError(null)
     setResult(null)
     samplesRef.current = []
     prevPixelsRef.current = null
     try {
+      const Detector = (window as unknown as { FaceDetector?: new (options?: { fastMode?: boolean; maxDetectedFaces?: number }) => NativeFaceDetector }).FaceDetector
+      detectorRef.current = Detector ? new Detector({ fastMode: true, maxDetectedFaces: 1 }) : null
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 320 }, height: { ideal: 240 } },
         audio: false,
@@ -215,7 +227,7 @@ export default function VideoPage() {
         setElapsed(secs)
       }, 250)
 
-      samplerRef.current = window.setInterval(() => {
+      samplerRef.current = window.setInterval(async () => {
         const video = videoRef.current
         const canvas = canvasRef.current
         if (!video || !canvas) return
@@ -231,6 +243,13 @@ export default function VideoPage() {
           return
         }
         const { signal, data } = analyzeFrame(ctx, w, h, prevPixelsRef.current)
+        if (detectorRef.current) {
+          try {
+            signal.faceLikely = (await detectorRef.current.detect(video)).length > 0
+          } catch {
+            detectorRef.current = null
+          }
+        }
         prevPixelsRef.current = data
         samplesRef.current.push(signal)
         setPreviewMeter({
@@ -269,8 +288,8 @@ export default function VideoPage() {
       faces_detected_ratio: +agg.facesDetectedRatio.toFixed(3),
       scores: agg.scores,
       signals: agg.signals,
-      model_provider: 'browser-heuristic',
-      model_name: 'browser-v0',
+      model_provider: detectorRef.current ? 'browser-face-detector' : 'browser-heuristic',
+      model_name: detectorRef.current ? 'native-presence-plus-signals-v1' : 'browser-v1',
     }
     try {
       const r = await api.post<FacialAnalyzeResponse>('/emotion/video', body)
@@ -288,7 +307,7 @@ export default function VideoPage() {
   if (!consent) {
     return (
       <div className="mx-auto max-w-2xl px-4 py-12">
-        <h1 className="text-2xl font-semibold mb-3">Facial check-in</h1>
+        <h1 className="text-2xl font-semibold mb-3">A check-in on your terms</h1>
         <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-800 p-5 text-sm">
           <p className="mb-3">
             Facial analysis is opt-in. Enable <strong>camera consent</strong>{' '}
@@ -314,7 +333,7 @@ export default function VideoPage() {
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
-      <h1 className="text-2xl font-semibold mb-2">Facial check-in</h1>
+      <h1 className="text-2xl font-semibold mb-2">A quiet face check-in</h1>
       <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">
         Look at the camera for ~{DEFAULT_SECONDS}s. We derive tentative signals
         on-device — <strong>your video never leaves this browser</strong>.
@@ -458,6 +477,14 @@ export default function VideoPage() {
           </div>
         </div>
       )}
+      <section className="mt-8">
+        <h2 className="font-semibold">Recent face check-ins</h2>
+        <p className="mt-1 text-sm text-slate-500">Only aggregated signals are kept—never photos or video.</p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          {history.length === 0 && <p className="text-sm italic text-slate-500">No earlier face check-ins.</p>}
+          {history.map((item) => <article key={item.id} className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900"><div className="flex items-center gap-2"><span className="text-2xl" aria-hidden>{EMOJI[item.dominant_emotion] ?? '😐'}</span><strong className="capitalize">{item.dominant_emotion}</strong></div><small className="mt-1 block text-slate-500">{new Date(item.created_at).toLocaleString()} · face present {fmt((item.faces_detected_ratio ?? 0) * 100, 0)}%</small></article>)}
+        </div>
+      </section>
     </div>
   )
 }

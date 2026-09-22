@@ -23,7 +23,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.crypto import EncryptedText
+from app.core.crypto import EncryptedJSON, EncryptedText
 from app.db.base import Base
 
 
@@ -50,13 +50,13 @@ class UserMemory(Base):
         nullable=False,
     )
     kind: Mapped[str] = mapped_column(String(24), nullable=False, default="custom")
-    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    title: Mapped[str] = mapped_column(EncryptedText, nullable=False)
     content: Mapped[str] = mapped_column(EncryptedText, nullable=False)
     source: Mapped[str] = mapped_column(String(24), nullable=False, default="manual")
     source_ref_id: Mapped[Optional[str]] = mapped_column(
         String(36), nullable=True, index=True
     )
-    tags: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
+    tags: Mapped[Optional[Any]] = mapped_column(EncryptedJSON, nullable=True)
     importance: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
     pinned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -95,8 +95,8 @@ class ConversationSummary(Base):
         nullable=False,
         index=True,
     )
-    summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    key_points: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
+    summary: Mapped[str] = mapped_column(EncryptedText, nullable=False, default="")
+    key_points: Mapped[Optional[Any]] = mapped_column(EncryptedJSON, nullable=True)
     message_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_message_id: Mapped[Optional[str]] = mapped_column(
         String(36), nullable=True

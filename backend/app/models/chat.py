@@ -16,7 +16,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.crypto import EncryptedText
+from app.core.crypto import EncryptedJSON, EncryptedText
 from app.db.base import Base
 
 
@@ -39,7 +39,7 @@ class Conversation(Base):
     user_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
     )
-    title: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    title: Mapped[Optional[str]] = mapped_column(EncryptedText, nullable=True)
     archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, server_default=func.now(), nullable=False
@@ -97,8 +97,8 @@ class RiskAssessment(Base):
         nullable=False,
     )
     level: Mapped[RiskLevel] = mapped_column(String(16), nullable=False)
-    categories: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
-    rationale: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    categories: Mapped[Optional[Any]] = mapped_column(EncryptedJSON, nullable=True)
+    rationale: Mapped[Optional[str]] = mapped_column(EncryptedText, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, server_default=func.now(), nullable=False
     )
@@ -117,7 +117,7 @@ class SafetyEvent(Base):
         String(36), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=True
     )
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
-    payload: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
+    payload: Mapped[Optional[Any]] = mapped_column(EncryptedJSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, server_default=func.now(), nullable=False
     )

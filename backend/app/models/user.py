@@ -8,6 +8,7 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from app.core.crypto import EncryptedText
 
 
 def _uuid() -> str:
@@ -26,6 +27,8 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    mfa_secret: Mapped[Optional[str]] = mapped_column(EncryptedText, nullable=True)
     # High-water mark for JWT iat revocation (§3.1). Bumped on password change
     # and logout-all so previously issued access tokens stop validating.
     password_changed_at: Mapped[datetime] = mapped_column(

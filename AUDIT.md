@@ -3,16 +3,40 @@
 This report records the defects fixed during the audit, the enhancements added,
 the verification performed, and the remaining production recommendations.
 
+## Implementation update — 2026-09-21
+
+The code work from the original recommendations is now implemented:
+
+| Original recommendation | Current implementation |
+| --- | --- |
+| Browser credential safety | Refresh tokens are `Secure`/`HttpOnly` cookies, access tokens are memory-only, refresh rotation remains enabled, and browser refresh/logout/password rotation require double-submit CSRF plus production Origin checks. |
+| Shared idempotency | Idempotency responses use Redis when configured, with bounded local fallback for development. |
+| Durable background work | Reminder delivery, email/push outboxes, journal reflection, and chat emotion analysis survive restarts in database-backed queues with locking, retries, and deduplication. |
+| Encryption at rest | Chat, journal, emotion, memory, reminder, notification, wellness, safety, consent, therapist-report, MFA, push-subscription, and queued-job sensitive content uses AES-256-GCM field encryption. Production refuses to boot without a valid 32-byte key. |
+| Account security | Email verification, password recovery, authenticator MFA, explicit Google linking, refresh-session review/revocation, and sign-out-all are available. |
+| Browser quality testing | Playwright covers desktop/mobile public flows and WCAG A/AA checks; CI runs Chromium tests. PostgreSQL migrations run against PostgreSQL in backend CI. |
+| Notifications | SMTP email and VAPID Web Push are optional durable delivery channels alongside the in-app inbox. |
+| Frontend monitoring | Sentry initializes only when `VITE_SENTRY_DSN` is configured and strips request bodies, query strings, cookies, and user email. |
+| CSP | `connect-src` is restricted to the API, Render, Sentry, and required Google identity endpoints; operators must replace `api.example.com` with the final API domain. |
+| Recovery/operations | A scheduled/manual GitHub backup restore drill validates Alembic and essential tables against an isolated restore database. Metrics, health/readiness, structured logs, backend/frontend Sentry, and a production launch runbook are present. |
+
+Additional completed product work includes the full Saaya visual redesign,
+onboarding and adult age gate, quick mood check-ins, journal editing,
+conversation deletion, real notification badges, theme application, voice and
+face histories, native browser face-presence detection when available, optional
+semantic embeddings, persisted safety-checked chat streaming, and verified-admin
+therapist curation/report workflows.
+
 ## Verified baseline
 
-- Backend automated test suite passes (242 tests at the time of this audit).
+- The full backend automated test suite passes.
 - All Alembic migrations apply to a fresh database and converge on one head:
-  `28c3e41f9a02`.
+  `8e1f3b4c6d75`.
 - Frontend lint and production build pass with no warnings.
 - `npm audit --omit=dev` and `pip-audit -r backend/requirements.txt` report no
   known vulnerabilities.
-- Route-level code splitting and shared server-state querying reduced the initial
-  application JavaScript bundle from approximately 539 kB to approximately 255 kB.
+- Route-level code splitting and shared server-state querying keep the initial
+  application JavaScript bundle under 300 kB, including monitoring support.
 
 ## Defects fixed
 
@@ -49,33 +73,27 @@ the verification performed, and the remaining production recommendations.
   reminder validation, production-only routing/configuration, Neon URLs, and
   Google identity handling.
 
-## Recommended next enhancements
+## Remaining operator actions
 
-1. Move refresh credentials from browser storage to `Secure`, `HttpOnly`,
-   same-site cookies after the final frontend/API domains are known, then add
-   explicit CSRF/origin protection.
-2. Move the process-local idempotency cache to Redis before running more than
-   one web replica.
-3. Use a durable task queue for reminders and other background jobs that must
-   survive restarts.
-4. Apply the existing encrypted-field helper to sensitive production model
-   fields; the helper is currently present but not wired into stored data.
-5. Add email verification, password reset, MFA, device/session management, and
-   account-linking confirmation flows.
-6. Add end-to-end, accessibility, mobile-layout, and real PostgreSQL concurrency
-   tests.
-7. Connect a real email or push notification provider; reminders are currently
-   in-app only.
-8. Initialize frontend Sentry when `VITE_SENTRY_DSN` is configured; the variable
-   is documented but not yet consumed by the frontend runtime.
-9. Tighten the production Content Security Policy's `connect-src` after the
-   final domains are assigned.
-10. Establish Neon backups/restore drills and production observability alerts.
+No application-code item from the original recommendation list remains open.
+Production still requires owner-controlled infrastructure and secrets:
+
+1. Provision Neon, Redis, SMTP, VAPID, Sentry, and at least one AI provider.
+2. Set the deployment variables documented in `.env.example`, `render.yaml`,
+   and `DEPLOY.md`, including a stable `FIELD_ENCRYPTION_KEY` that is backed up
+   separately from the database.
+3. Replace `api.example.com` in the CSP with the final API hostname.
+4. Configure `BACKUP_SOURCE_DATABASE_URL` and an isolated
+   `BACKUP_RESTORE_DATABASE_URL` GitHub secret, then run the restore drill once.
+5. Create Sentry alert rules and notification recipients in the Sentry account;
+   repository code cannot select the project owner's escalation contacts.
+6. Populate the therapist directory through a verified account listed in
+   `THERAPIST_ADMIN_EMAILS`; production no longer loads fictional seed records.
 
 ## Live deployment prerequisites
 
-- This directory is not currently a Git repository and has no remote. Vercel
-  and Render need a connected source repository (or an authenticated CLI flow).
+- The repository has a GitHub remote; Vercel and Render still require the
+  project owner to authorize their accounts and select the repository.
 - Vercel, Render, Neon, and Google Cloud are open at their sign-in screens and
   require the project owner to authenticate.
 - The Render Blueprint now targets one free web service. Render has no free
